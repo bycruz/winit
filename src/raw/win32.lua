@@ -55,11 +55,6 @@ function Win32Window.new(eventLoop, width, height)
 	return setmetatable({ hwnd = window, id = ffiptrToDouble(window), width = width, height = height }, Win32Window)
 end
 
----@param _image any
-function Win32Window:setIcon(_image)
-	print("Warning: Win32Window:setIcon is unimplemented")
-end
-
 local cursors = {
 	pointer = user32.IDC.ARROW,
 	hand2 = user32.IDC.HAND,

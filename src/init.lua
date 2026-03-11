@@ -13,7 +13,6 @@ local windowBackend =
 ---@field new fun(eventLoop: winit.EventLoop, width: number, height: number): winit.Window
 ---@field destroy fun(self: winit.Window)
 ---@field setTitle fun(self: winit.Window, title: string)
----@field setIcon fun(self: winit.Window, image: any)
 ---@field setCursor fun(self: winit.Window, shape: string)
 ---@field resetCursor fun(self: winit.Window)
 local Window = windowBackend.Window

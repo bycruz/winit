@@ -45,43 +45,6 @@ function X11Window.new(eventLoop, width, height)
 	return window
 end
 
----@param image any
-function X11Window:setIcon(image)
-	if image == nil then
-		return
-	end
-
-	local iconSize = 2 + (image.width * image.height)
-	local iconData = ffi.new("uint32_t[?]", iconSize)
-
-	iconData[0] = image.width
-	iconData[1] = image.height
-
-	local pixels = ffi.cast("uint8_t*", image.pixels)
-
-	if image.channels == 4 then -- RGBA8 -> ARGB32
-		for i = 0, image.width * image.height - 1 do
-			local r = pixels[i * 4 + 0]
-			local g = pixels[i * 4 + 1]
-			local b = pixels[i * 4 + 2]
-			local a = pixels[i * 4 + 3]
-
-			iconData[i + 2] = bit.bor(bit.lshift(a, 24), bit.lshift(r, 16), bit.lshift(g, 8), b)
-		end
-	else -- RGB8 -> ARGB32 (assuming fully opaque)
-		for i = 0, image.width * image.height - 1 do
-			local r = pixels[i * 3 + 0]
-			local g = pixels[i * 3 + 1]
-			local b = pixels[i * 3 + 2]
-
-			iconData[i + 2] = bit.bor(0xFF000000, bit.lshift(r, 16), bit.lshift(g, 8), b)
-		end
-	end
-
-	x11.changeProperty(self.display, self.id, "_NET_WM_ICON", "CARDINAL", 32, 0, ffi.cast("unsigned char*", iconData),
-		iconSize)
-end
-
 local cursors = {
 	pointer = x11.Icon.LeftPtr,
 	hand2 = x11.Icon.Hand2,
