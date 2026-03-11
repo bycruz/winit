@@ -4,5 +4,8 @@
 	"dependencies": {
 		"x11api": { "git": "https://github.com/codebycruz/x11api" },
 		"winapi": { "git": "https://github.com/codebycruz/winapi" }
+	},
+	"devDependencies": {
+		"lpm-test": { "git": "https://github.com/codebycruz/lpm" }
 	}
 }
