@@ -38,7 +38,8 @@ function X11Window.new(eventLoop, width, height)
 			x11.EventMaskBits.ButtonRelease,
 			x11.EventMaskBits.PointerMotion,
 			x11.EventMaskBits.KeyPress,
-			x11.EventMaskBits.KeyRelease
+			x11.EventMaskBits.KeyRelease,
+			x11.EventMaskBits.FocusChange
 		)
 	)
 	x11.mapWindow(display, window.id)
@@ -261,6 +262,14 @@ function X11EventLoop:run(callback)
 			}, handler)
 		end,
 
+		[x11.EventType.FocusIn] = function(window)
+			callback({ window = window, name = "focusIn" }, handler)
+		end,
+
+		[x11.EventType.FocusOut] = function(window)
+			callback({ window = window, name = "focusOut" }, handler)
+		end,
+
 		[x11.EventType.KeyPress] = function(window)
 			local char, keysym = x11.lookupString(event)
 			local key = keysymToKey(tonumber(keysym), char)
@@ -276,7 +285,7 @@ function X11EventLoop:run(callback)
 
 		[x11.EventType.KeyRelease] = function(window)
 			local char, keysym = x11.lookupString(event)
-			local key = keysymToKey(keysym, char)
+			local key = keysymToKey(tonumber(keysym), char)
 			if key then
 				callback({
 					window = window,
