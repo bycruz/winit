@@ -45,7 +45,7 @@ function X11Window.new(eventLoop, width, height)
 	return window
 end
 
----@param image Image|nil
+---@param image any
 function X11Window:setIcon(image)
 	if image == nil then
 		return
