@@ -1,4 +1,4 @@
-# winit
+# winit [![Tests](https://github.com/codebycruz/winit/actions/workflows/test.yml/badge.svg)](https://github.com/codebycruz/winit/actions/workflows/test.yml)
 
 Window creation and handling library in pure LuaJIT.
 
