@@ -214,10 +214,10 @@ end
 function X11EventLoop:run(callback)
 	local display = self.display
 	local event = x11.Event()
+	local tempEvent = x11.Event()
 
 	local wmDeleteWindow = x11.internAtom(display, "WM_DELETE_WINDOW", 0)
 
-	-- Subscribe to XI2 RawMotion on the root window for unclipped motion deltas
 	local root = x11.defaultRootWindow(display)
 	xi2.selectEvents(display, root, xi2.Device.All, { xi2.EventType.RawMotion })
 
@@ -242,6 +242,56 @@ function X11EventLoop:run(callback)
 		function handler.close(_, window)
 			self:close(window)
 		end
+	end
+
+	local function readRawMotion(cookie)
+		local raw = xi2.castRawEvent(cookie)
+		local dx, dy = 0.0, 0.0
+		local vi = 0
+		for axis = 0, raw.valuators.mask_len * 8 - 1 do
+			local byte   = math.floor(axis / 8)
+			local bitpos = axis % 8
+			if bit.band(raw.valuators.mask[byte], bit.lshift(1, bitpos)) ~= 0 then
+				if axis == 0 then dx = raw.valuators.values[vi] end
+				if axis == 1 then dy = raw.valuators.values[vi] end
+				vi = vi + 1
+			end
+		end
+		return dx, dy
+	end
+
+	local function coalesceMouse()
+		while x11.pending(display) > 0 do
+			x11.peekEvent(display, tempEvent)
+			if tempEvent.type ~= x11.EventType.MotionNotify
+				or tempEvent.xmotion.window ~= event.xmotion.window then
+				break
+			end
+			x11.nextEvent(display, event)
+		end
+	end
+
+	---@param dx number
+	---@param dy number
+	local function coalesceMouseMotion(dx, dy)
+		while x11.pending(display) > 0 do
+			x11.peekEvent(display, tempEvent)
+			if tempEvent.type ~= x11.EventType.GenericEvent then break end
+
+			x11.nextEvent(display, tempEvent)
+			if not x11.getEventData(display, tempEvent.xcookie) then break end
+			if tempEvent.xcookie.evtype ~= xi2.EventType.RawMotion then
+				x11.freeEventData(display, tempEvent.xcookie)
+				break
+			end
+
+			local ddx, ddy = readRawMotion(tempEvent.xcookie)
+			x11.freeEventData(display, tempEvent.xcookie)
+			dx = dx + ddx
+			dy = dy + ddy
+		end
+
+		return dx, dy
 	end
 
 	---@type table<number, fun(window: winit.Window)>
@@ -270,8 +320,6 @@ function X11EventLoop:run(callback)
 				window.width = newWidth
 				window.height = newHeight
 				callback({ window = window, name = "resize" }, handler)
-			else -- Move event?
-				-- Ignored for now
 			end
 		end,
 
@@ -346,23 +394,16 @@ function X11EventLoop:run(callback)
 		[x11.EventType.GenericEvent] = function(_window)
 			if not x11.getEventData(display, event.xcookie) then return end
 
-			if event.xcookie.evtype == xi2.EventType.RawMotion then
-				local raw = xi2.castRawEvent(event.xcookie)
-				local dx, dy = 0.0, 0.0
-				local vi = 0
-				for axis = 0, raw.valuators.mask_len * 8 - 1 do
-					local byte   = math.floor(axis / 8)
-					local bitpos = axis % 8
-					if bit.band(raw.valuators.mask[byte], bit.lshift(1, bitpos)) ~= 0 then
-						if axis == 0 then dx = raw.valuators.values[vi] end
-						if axis == 1 then dy = raw.valuators.values[vi] end
-						vi = vi + 1
-					end
-				end
-				callback({ name = "mouseMotion", dx = dx, dy = dy }, handler)
+			if event.xcookie.evtype ~= xi2.EventType.RawMotion then
+				x11.freeEventData(display, event.xcookie)
+				return
 			end
 
+			local dx, dy = readRawMotion(event.xcookie)
 			x11.freeEventData(display, event.xcookie)
+
+			dx, dy = coalesceMouseMotion(dx, dy)
+			callback({ name = "mouseMotion", dx = dx, dy = dy }, handler)
 		end,
 	}
 
@@ -378,35 +419,13 @@ function X11EventLoop:run(callback)
 		end
 	end
 
-	local function coalesceMouse()
-		if x11.pending(display) == 0 then
-			return
-		end
-
-		local tempEvent = x11.Event()
-		local hasMoreMotion = true
-
-		while hasMoreMotion and x11.pending(display) > 0 do
-			x11.peekEvent(display, tempEvent)
-			if tempEvent.type == x11.EventType.MotionNotify and tempEvent.xmotion.window == event.xmotion.window then
-				x11.nextEvent(display, event)
-			else
-				hasMoreMotion = false
-			end
-		end
-	end
-
 	local redrawEvent = { name = "redraw" }
 	local aboutToWaitEvent = { name = "aboutToWait" }
 
 	while isActive do
 		if currentMode == "poll" then
-			if x11.pending(display) > 0 then
+			while x11.pending(display) > 0 do
 				x11.nextEvent(display, event)
-				if event.type == x11.EventType.MotionNotify then
-					coalesceMouse()
-				end
-
 				processEvent()
 			end
 		else
