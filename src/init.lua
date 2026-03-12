@@ -47,6 +47,7 @@ end
 --- | { window: winit.Window, name: "create" }
 --- | { window: winit.Window, name: "unmap" }
 --- | { window: winit.Window, name: "mouseMove", x: number, y: number }
+--- | { name: "mouseMotion", dx: number, dy: number }
 --- | { window: winit.Window, name: "mousePress", x: number, y: number, button: number }
 --- | { window: winit.Window, name: "mouseRelease", x: number, y: number, button: number }
 --- | { window: winit.Window, name: "keyPress", key: winit.KeyName, modifiers: winit.KeyModifiers }

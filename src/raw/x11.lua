@@ -1,4 +1,5 @@
 local x11 = require("x11api")
+local xi2 = require("x11api.xi2")
 
 ---@class winit.x11.Window: winit.Window
 ---@field display x11.ffi.Display
@@ -216,6 +217,10 @@ function X11EventLoop:run(callback)
 
 	local wmDeleteWindow = x11.internAtom(display, "WM_DELETE_WINDOW", 0)
 
+	-- Subscribe to XI2 RawMotion on the root window for unclipped motion deltas
+	local root = x11.defaultRootWindow(display)
+	xi2.selectEvents(display, root, xi2.Device.All, { xi2.EventType.RawMotion })
+
 	local isActive = true
 	local currentMode = "poll"
 
@@ -243,10 +248,6 @@ function X11EventLoop:run(callback)
 	local Handlers = {
 		[x11.EventType.MotionNotify] = function(window)
 			callback({ window = window, name = "mouseMove", x = event.xmotion.x, y = event.xmotion.y }, handler)
-			if window.cursorGrab == "locked" then
-				x11.warpPointer(display, 0, window.id, 0, 0, 0, 0,
-					math.floor(window.width / 2), math.floor(window.height / 2))
-			end
 		end,
 
 		[x11.EventType.ClientMessage] = function(window)
@@ -340,6 +341,28 @@ function X11EventLoop:run(callback)
 					modifiers = keyModifiers(event.xkey.state),
 				}, handler)
 			end
+		end,
+
+		[x11.EventType.GenericEvent] = function(_window)
+			if not x11.getEventData(display, event.xcookie) then return end
+
+			if event.xcookie.evtype == xi2.EventType.RawMotion then
+				local raw = xi2.castRawEvent(event.xcookie)
+				local dx, dy = 0.0, 0.0
+				local vi = 0
+				for axis = 0, raw.valuators.mask_len * 8 - 1 do
+					local byte   = math.floor(axis / 8)
+					local bitpos = axis % 8
+					if bit.band(raw.valuators.mask[byte], bit.lshift(1, bitpos)) ~= 0 then
+						if axis == 0 then dx = raw.valuators.values[vi] end
+						if axis == 1 then dy = raw.valuators.values[vi] end
+						vi = vi + 1
+					end
+				end
+				callback({ name = "mouseMotion", dx = dx, dy = dy }, handler)
+			end
+
+			x11.freeEventData(display, event.xcookie)
 		end,
 	}
 
