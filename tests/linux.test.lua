@@ -4,7 +4,7 @@ end
 
 local x11 = require("x11api")
 local winit = require("winit")
-local test = require("lpm-test")
+local test = require("lde-test")
 
 local EventLoop = winit.EventLoop
 local Window = winit.Window

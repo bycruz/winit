@@ -16,19 +16,19 @@ jobs:
         runs-on: ${{ matrix.os }}
         steps:
             - uses: actions/checkout@v6
-            - uses: codebycruz/lpm@master
+            - uses: lde-org/lde@master
 
             - name: Install Xvfb
               if: runner.os == 'Linux'
               run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
 
             - name: Install dependencies
-              run: lpm install
+              run: lde install
 
             - name: Run tests (Linux)
               if: runner.os == 'Linux'
-              run: xvfb-run lpm test
+              run: xvfb-run lde test
 
             - name: Run tests (Windows)
               if: runner.os == 'Windows'
-              run: lpm test
+              run: lde test

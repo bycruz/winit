@@ -2,7 +2,7 @@ if jit.os ~= "Windows" then
 	return
 end
 
-local test = require("lpm-test")
+local test = require("lde-test")
 local winit = require("winit")
 local user32 = require("winapi.user32")
 local kernel32 = require("winapi.kernel32")

@@ -4,14 +4,14 @@ Window creation and handling library in pure LuaJIT.
 
 ## Support
 
-| Arch        | Windows | Linux | macOS |
-| ----------- | ------- | ----- | ----- |
-| x86-64      | ✅      | ✅    | ❌    |
+| Arch   | Windows | Linux | macOS |
+| ------ | ------- | ----- | ----- |
+| x86-64 | ✅      | ✅    | ❌    |
 
 ## Installation
 
-This is mainly intended to be consumed with the [lpm](https://github.com/codebycruz/lpm) package manager.
+Use this package with the [lde](https://lde.sh/) package manager.
 
 ```bash
-lpm add --git https://github.com/codebycruz/winit
+lde add --git https://github.com/codebycruz/winit
 ```
