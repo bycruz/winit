@@ -336,23 +336,37 @@ function X11EventLoop:run(callback)
 		end,
 
 		[x11.EventType.ButtonPress] = function(window)
-			callback({
-				window = window,
-				name = "mousePress",
-				x = event.xbutton.x,
-				y = event.xbutton.y,
-				button = event.xbutton.button,
-			}, handler)
+			local button = event.xbutton.button
+			if button == 4 then
+				callback({ window = window, name = "mouseScroll", dx = 0, dy = -1 }, handler)
+			elseif button == 5 then
+				callback({ window = window, name = "mouseScroll", dx = 0, dy = 1 }, handler)
+			elseif button == 6 then
+				callback({ window = window, name = "mouseScroll", dx = -1, dy = 0 }, handler)
+			elseif button == 7 then
+				callback({ window = window, name = "mouseScroll", dx = 1, dy = 0 }, handler)
+			else
+				callback({
+					window = window,
+					name = "mousePress",
+					x = event.xbutton.x,
+					y = event.xbutton.y,
+					button = button,
+				}, handler)
+			end
 		end,
 
 		[x11.EventType.ButtonRelease] = function(window)
-			callback({
-				window = window,
-				name = "mouseRelease",
-				x = event.xbutton.x,
-				y = event.xbutton.y,
-				button = event.xbutton.button,
-			}, handler)
+			local button = event.xbutton.button
+			if button < 4 or button > 7 then
+				callback({
+					window = window,
+					name = "mouseRelease",
+					x = event.xbutton.x,
+					y = event.xbutton.y,
+					button = button,
+				}, handler)
+			end
 		end,
 
 		[x11.EventType.FocusIn] = function(window)
