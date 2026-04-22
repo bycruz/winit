@@ -364,9 +364,8 @@ function X11EventLoop:run(callback)
 		end,
 
 		[x11.EventType.KeyPress] = function(window)
-			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
-			local baseChar = (baseKeysym >= 0x20 and baseKeysym <= 0x7e) and string.char(baseKeysym) or ""
-			local key = keysymToKey(baseKeysym, baseChar)
+			local char, keysym = x11.lookupString(event)
+			local key = keysymToKey(tonumber(keysym), char)
 			if key then
 				callback({
 					window = window,
