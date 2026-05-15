@@ -1,34 +1,31 @@
 name: Tests
 
 on:
-    push:
-        branches: [master]
-    pull_request:
-        branches: [master]
-    workflow_dispatch:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
 
 jobs:
-    test:
-        strategy:
-            fail-fast: false
-            matrix:
-                os: [ubuntu-latest, windows-latest]
-        runs-on: ${{ matrix.os }}
-        steps:
-            - uses: actions/checkout@v6
-            - uses: lde-org/lde@master
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: lde-org/lde@master
 
-            - name: Install Xvfb
-              if: runner.os == 'Linux'
-              run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
+      - name: Install Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
 
-            - name: Install dependencies
-              run: lde install
+      - name: Run tests (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run lde test
 
-            - name: Run tests (Linux)
-              if: runner.os == 'Linux'
-              run: xvfb-run lde test
-
-            - name: Run tests (Windows)
-              if: runner.os == 'Windows'
-              run: lde test
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        run: lde test

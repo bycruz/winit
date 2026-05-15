@@ -1,3 +1,4 @@
+local ffi = require("ffi")
 local x11 = require("x11api")
 local xi2 = require("x11api.xi2")
 
@@ -6,6 +7,9 @@ local xi2 = require("x11api.xi2")
 ---@field currentCursor number?
 ---@field blankCursor number?
 ---@field cursorGrab winit.CursorGrab?
+---@field syncCounter number?
+---@field syncPendingLo number?
+---@field syncPendingHi number?
 local X11Window = {}
 X11Window.__index = X11Window
 
@@ -27,9 +31,41 @@ function X11Window.new(eventLoop, width, height)
 		error("Failed to create window")
 	end
 
-	local window = setmetatable({ display = display, id = id, width = width, height = height }, X11Window)
+	local window = setmetatable({
+		display = display,
+		id = id,
+		width = width,
+		height = height,
+		syncCounter = nil,
+		syncPendingLo = nil,
+		syncPendingHi = nil
+	}, X11Window)
 
-	x11.setWMProtocols(display, window.id, { "WM_DELETE_WINDOW" })
+	-- Prevent X11 from auto-painting the background (avoids black flicker on resize)
+	x11.setWindowBackgroundPixmap(display, window.id, 0) -- 0 = None
+
+	-- Set up _NET_WM_SYNC_REQUEST protocol if the XSync extension is available
+	local protocols = { "WM_DELETE_WINDOW" }
+	do
+		local major = x11.syncInitialize(display)
+		if major then
+			-- Create a sync counter initialized to 0
+			local counter = x11.syncCreateCounter(display, 0)
+
+			-- Set _NET_WM_SYNC_REQUEST_COUNTER property (CARDINAL, 32-bit)
+			-- XSyncCounter is unsigned long (64-bit), truncate to uint32_t for CARDINAL
+			local counterVal = ffi.new("uint32_t[1]", tonumber(bit.band(counter, 0xFFFFFFFF)))
+			x11.changeProperty(display, window.id,
+				"_NET_WM_SYNC_REQUEST_COUNTER", "CARDINAL", 32, 0,
+				ffi.cast("const unsigned char *", counterVal), 1)
+
+			window.syncCounter = counter
+			table.insert(protocols, "_NET_WM_SYNC_REQUEST")
+		end
+	end
+
+	x11.setWMProtocols(display, window.id, protocols)
+
 	x11.selectInput(
 		display,
 		window.id,
@@ -85,7 +121,7 @@ local keysymNames = {
 	[0xffea] = "right-alt",
 	[0xffeb] = "left-super",
 	[0xffec] = "right-super",
-	[0xffe5] = "caps-lock",
+	[0xffe5] = "caps-lock"
 }
 
 ---@param keysym number
@@ -104,13 +140,13 @@ local function keyModifiers(state)
 		lock  = bit.band(state, 2) ~= 0,
 		ctrl  = bit.band(state, 4) ~= 0,
 		alt   = bit.band(state, 8) ~= 0,
-		super = bit.band(state, 64) ~= 0,
+		super = bit.band(state, 64) ~= 0
 	}
 end
 
 local cursors = {
 	pointer = x11.Icon.LeftPtr,
-	hand2 = x11.Icon.Hand2,
+	hand2 = x11.Icon.Hand2
 }
 
 ---@return number
@@ -182,6 +218,18 @@ function X11Window:destroy()
 		x11.freeCursor(self.display, self.blankCursor)
 	end
 
+	-- Destroy XSync counter (server-side resource cleanup)
+	if self.syncCounter then
+		-- Set counter to a minimum value to unblock any compositor waiting on it.
+		-- Construct XSyncValue manually instead of calling x11.syncMinValue()
+		-- which can cause FFI issues with struct-by-value returns.
+		local doneVal = x11.SyncValue()
+		doneVal.hi = -1
+		doneVal.lo = 0
+		x11.syncSetCounter(self.display, self.syncCounter, doneVal)
+		x11.syncDestroyCounter(self.display, self.syncCounter)
+	end
+
 	x11.destroyWindow(self.display, self.id)
 end
 
@@ -217,6 +265,7 @@ function X11EventLoop:run(callback)
 	local tempEvent = x11.Event()
 
 	local wmDeleteWindow = x11.internAtom(display, "WM_DELETE_WINDOW", 0)
+	local netWmSyncRequest = x11.internAtom(display, "_NET_WM_SYNC_REQUEST", 0)
 
 	local root = x11.defaultRootWindow(display)
 	xi2.selectEvents(display, root, xi2.Device.All, { xi2.EventType.RawMotion })
@@ -303,6 +352,16 @@ function X11EventLoop:run(callback)
 		[x11.EventType.ClientMessage] = function(window)
 			if event.xclient.data.l[0] == wmDeleteWindow then
 				callback({ window = window, name = "windowClose" }, handler)
+			elseif event.xclient.message_type == netWmSyncRequest then
+				-- _NET_WM_SYNC_REQUEST: store the serial value the compositor
+				-- expects us to acknowledge with after drawing.
+				-- data.l[0] = serial (matches ConfigureNotify serial)
+				-- data.l[1] = low 32 bits of sync counter value
+				-- data.l[2] = high 32 bits of sync counter value
+				if window and window.syncCounter then
+					window.syncPendingLo = bit.band(event.xclient.data.l[1], 0xFFFFFFFF)
+					window.syncPendingHi = bit.band(event.xclient.data.l[2], 0xFFFFFFFF)
+				end
 			end
 		end,
 
@@ -351,7 +410,7 @@ function X11EventLoop:run(callback)
 					name = "mousePress",
 					x = event.xbutton.x,
 					y = event.xbutton.y,
-					button = button,
+					button = button
 				}, handler)
 			end
 		end,
@@ -364,7 +423,7 @@ function X11EventLoop:run(callback)
 					name = "mouseRelease",
 					x = event.xbutton.x,
 					y = event.xbutton.y,
-					button = button,
+					button = button
 				}, handler)
 			end
 		end,
@@ -385,7 +444,7 @@ function X11EventLoop:run(callback)
 					window = window,
 					name = "keyPress",
 					key = key,
-					modifiers = keyModifiers(event.xkey.state),
+					modifiers = keyModifiers(event.xkey.state)
 				}, handler)
 			end
 		end,
@@ -399,7 +458,7 @@ function X11EventLoop:run(callback)
 					window = window,
 					name = "keyRelease",
 					key = key,
-					modifiers = keyModifiers(event.xkey.state),
+					modifiers = keyModifiers(event.xkey.state)
 				}, handler)
 			end
 		end,
@@ -417,7 +476,7 @@ function X11EventLoop:run(callback)
 
 			dx, dy = coalesceMouseMotion(dx, dy)
 			callback({ name = "mouseMotion", dx = dx, dy = dy }, handler)
-		end,
+		end
 	}
 
 	local function processEvent()
@@ -455,6 +514,18 @@ function X11EventLoop:run(callback)
 				window.shouldRedraw = false
 				redrawEvent.window = window
 				callback(redrawEvent, handler)
+
+				-- Acknowledge _NET_WM_SYNC_REQUEST after the application
+				-- has finished drawing (user's redraw callback just returned).
+				if window.syncPendingLo ~= nil and window.syncCounter then
+					local value = x11.syncIntsToValue(
+						window.syncPendingLo,
+						window.syncPendingHi
+					)
+					x11.syncSetCounter(display, window.syncCounter, value)
+					window.syncPendingLo = nil
+					window.syncPendingHi = nil
+				end
 			end
 		end
 
