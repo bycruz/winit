@@ -1,4 +1,4 @@
-# winit [![Tests](https://github.com/codebycruz/winit/actions/workflows/test.yml/badge.svg)](https://github.com/codebycruz/winit/actions/workflows/test.yml)
+# winit [![Tests](https://github.com/bycruz/winit/actions/workflows/test.yml/badge.svg)](https://github.com/bycruz/winit/actions/workflows/test.yml)
 
 Window creation and handling library in pure LuaJIT.
 
@@ -13,5 +13,5 @@ Window creation and handling library in pure LuaJIT.
 Use this package with the [lde](https://lde.sh/) package manager.
 
 ```bash
-lde add --git https://github.com/codebycruz/winit
+lde add --git https://github.com/bycruz/winit
 ```

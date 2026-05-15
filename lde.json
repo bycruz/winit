@@ -3,11 +3,11 @@
 	"version": "0.1.0",
 	"dependencies": {
 		"x11api": {
-			"git": "https://github.com/codebycruz/x11api",
+			"git": "https://github.com/bycruz/x11api",
 			"optional": true
 		},
 		"winapi": {
-			"git": "https://github.com/codebycruz/winapi",
+			"git": "https://github.com/bycruz/winapi",
 			"optional": true
 		}
 	},
