@@ -1,0 +1,19 @@
+{
+	"name": "draw",
+	"version": "0.1.0",
+	"dependencies": {
+		"winit": { "path": "../.." },
+		"x11api": {
+			"git": "https://github.com/bycruz/x11api",
+			"optional": true
+		},
+		"winapi": {
+			"git": "https://github.com/bycruz/winapi",
+			"optional": true
+		}
+	},
+	"features": {
+		"windows": ["winapi"],
+		"linux": ["x11api"]
+	}
+}
