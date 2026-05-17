@@ -352,15 +352,10 @@ function X11EventLoop:run(callback)
 		[x11.EventType.ClientMessage] = function(window)
 			if event.xclient.data.l[0] == wmDeleteWindow then
 				callback({ window = window, name = "windowClose" }, handler)
-			elseif event.xclient.message_type == netWmSyncRequest then
-				-- _NET_WM_SYNC_REQUEST: store the serial value the compositor
-				-- expects us to acknowledge with after drawing.
-				-- data.l[0] = serial (matches ConfigureNotify serial)
-				-- data.l[1] = low 32 bits of sync counter value
-				-- data.l[2] = high 32 bits of sync counter value
+			elseif event.xclient.data.l[0] == netWmSyncRequest then
 				if window and window.syncCounter then
-					window.syncPendingLo = bit.band(event.xclient.data.l[1], 0xFFFFFFFF)
-					window.syncPendingHi = bit.band(event.xclient.data.l[2], 0xFFFFFFFF)
+					window.syncPendingLo = bit.band(event.xclient.data.l[2], 0xFFFFFFFF)
+					window.syncPendingHi = bit.band(event.xclient.data.l[3], 0xFFFFFFFF)
 				end
 			end
 		end,
