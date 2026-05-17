@@ -233,7 +233,17 @@ function X11Window:destroy()
 	x11.destroyWindow(self.display, self.id)
 end
 
+---@private
+function X11Window:acknowledgeSync()
+	if self.syncPendingLo ~= nil and self.syncCounter then
+		local value = x11.syncIntsToValue(self.syncPendingLo, self.syncPendingHi)
+		x11.syncSetCounter(self.display, self.syncCounter, value)
+		self.syncPendingLo, self.syncPendingHi = nil, nil
+	end
+end
+
 ---@class winit.x11.EventLoop: winit.EventLoop
+---@field windows table<string, winit.x11.Window>
 ---@field display x11.ffi.Display
 local X11EventLoop = {}
 X11EventLoop.__index = X11EventLoop
@@ -247,7 +257,7 @@ function X11EventLoop.new()
 	return setmetatable({ display = display, windows = {} }, X11EventLoop)
 end
 
----@param window winit.Window
+---@param window winit.x11.Window
 function X11EventLoop:register(window)
 	self.windows[tostring(window.id)] = window
 end
@@ -343,7 +353,7 @@ function X11EventLoop:run(callback)
 		return dx, dy
 	end
 
-	---@type table<number, fun(window: winit.Window)>
+	---@type table<number, fun(window: winit.x11.Window)>
 	local Handlers = {
 		[x11.EventType.MotionNotify] = function(window)
 			callback({ window = window, name = "mouseMove", x = event.xmotion.x, y = event.xmotion.y }, handler)
@@ -509,18 +519,7 @@ function X11EventLoop:run(callback)
 				window.shouldRedraw = false
 				redrawEvent.window = window
 				callback(redrawEvent, handler)
-
-				-- Acknowledge _NET_WM_SYNC_REQUEST after the application
-				-- has finished drawing (user's redraw callback just returned).
-				if window.syncPendingLo ~= nil and window.syncCounter then
-					local value = x11.syncIntsToValue(
-						window.syncPendingLo,
-						window.syncPendingHi
-					)
-					x11.syncSetCounter(display, window.syncCounter, value)
-					window.syncPendingLo = nil
-					window.syncPendingHi = nil
-				end
+				window:acknowledgeSync()
 			end
 		end
 
