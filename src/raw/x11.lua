@@ -87,6 +87,7 @@ function X11Window.new(eventLoop, width, height)
 end
 
 local keysymNames = {
+	[0x20]   = "space",
 	[0xff08] = "backspace",
 	[0xff09] = "tab",
 	[0xff0d] = "return",

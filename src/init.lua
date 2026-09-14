@@ -30,7 +30,7 @@ end
 ---@alias winit.KeyModifiers { shift: boolean, lock: boolean, ctrl: boolean, alt: boolean, super: boolean }
 
 ---@alias winit.KeyName
---- | "backspace" | "tab" | "return" | "escape"
+--- | "space" | "backspace" | "tab" | "return" | "escape"
 --- | "home" | "end" | "insert" | "delete" | "page-up" | "page-down"
 --- | "left" | "right" | "up" | "down"
 --- | "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12"
