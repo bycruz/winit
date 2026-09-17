@@ -51,7 +51,7 @@ end
 --- | { window: winit.Window, name: "mouseScroll", dx: number, dy: number }
 --- | { window: winit.Window, name: "mousePress", x: number, y: number, button: number }
 --- | { window: winit.Window, name: "mouseRelease", x: number, y: number, button: number }
---- | { window: winit.Window, name: "keyPress", key: winit.KeyName, modifiers: winit.KeyModifiers }
+--- | { window: winit.Window, name: "keyPress", key: winit.KeyName, modifiers: winit.KeyModifiers, text: string? }
 --- | { window: winit.Window, name: "keyRelease", key: winit.KeyName, modifiers: winit.KeyModifiers }
 --- | { window: winit.Window, name: "focusIn" }
 --- | { window: winit.Window, name: "focusOut" }

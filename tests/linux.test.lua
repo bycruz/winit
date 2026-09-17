@@ -112,6 +112,79 @@ test.it("should emit an aboutToWait event when running the loop", function()
 	teardown(eventLoop, window)
 end)
 
+--- The keycode a keysym sits on, since X answers that question the other way round.
+---@param display x11.ffi.Display
+---@param keysym number
+---@return number
+local function keycodeOf(display, keysym)
+	for keycode = 8, 255 do
+		if tonumber(x11.keycodeToKeysym(display, keycode, 0)) == keysym then
+			return keycode
+		end
+	end
+	error("no keycode for keysym " .. keysym)
+end
+
+test.it("should name a key after the key and not after the text a modifier makes it type", function()
+	local eventLoop, window = setup()
+	local display = eventLoop.display
+
+	-- the key W, pressed while control is held, which X types as a control character
+	local keycode = keycodeOf(display, 0x77)
+
+	local event = x11.Event()
+	event.type = x11.EventType.KeyPress
+	event.xkey.window = window.id
+	event.xkey.keycode = keycode
+	event.xkey.state = 4 -- ControlMask
+
+	x11.sendEvent(display, window.id, x11.False, x11.EventMaskBits.KeyPress, event)
+	x11.flush(display)
+
+	local keys = {}
+	local frames = 0
+	eventLoop:run(function(seen, handler)
+		handler:setMode("poll")
+		frames = frames + 1
+		if seen.name == "keyPress" then
+			keys[#keys + 1] = seen.key
+			handler:exit()
+		end
+		if frames > 60 then
+			handler:exit()
+		end
+	end)
+
+	test.equal(#keys, 1)
+	test.equal(keys[1], "w")
+
+	teardown(eventLoop, window)
+end)
+
+test.it("should leave the pointer where a menu put it rather than dragging it to the middle", function()
+	local eventLoop, window = setup()
+	local display = eventLoop.display
+
+	-- playing grabs the pointer and hides it, and a menu lets go of it again
+	window:setCursorGrab("locked")
+	window:setCursorGrab("none")
+
+	-- where a player moves the mouse to while a menu is open
+	x11.warpPointer(display, 0, window.id, 0, 0, 0, 0, 40, 40)
+	x11.flush(display)
+
+	-- safety: a menu asks for the mode it is already in every frame, and asking again is
+	-- not a reason to move the pointer back to the middle of the window
+	window:setCursorGrab("none")
+	x11.flush(display)
+
+	local x, y = x11.queryPointer(display, window.id)
+	test.equal(x, 40)
+	test.equal(y, 40)
+
+	teardown(eventLoop, window)
+end)
+
 test.it("should create a window via Window.fromEventLoop with default dimensions", function()
 	local eventLoop = EventLoop.new() ---@cast eventLoop winit.x11.EventLoop
 	local window = Window.fromEventLoop(eventLoop) ---@cast window winit.x11.Window

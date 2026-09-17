@@ -131,6 +131,20 @@ local keysymNames = {
 local function keysymToKey(keysym, char)
 	local named = keysymNames[keysym]
 	if named then return named end
+
+	-- safety: the keysym is which key it is, whatever modifiers are held, while the text
+	-- X hands back is what the combination types: control turns a letter into a control
+	-- character and shift turns it into its capital. Naming a key after the text leaves a
+	-- key held with control named something no game asks about, and its release named
+	-- something else again
+	if keysym >= 0x20 and keysym <= 0x7e then
+		local plain = string.char(keysym)
+		if keysym >= 0x41 and keysym <= 0x5a then
+			plain = plain:lower()
+		end
+		return plain
+	end
+
 	if #char > 0 then return char end
 	return nil
 end
@@ -163,6 +177,14 @@ end
 
 ---@param mode winit.CursorGrab
 function X11Window:setCursorGrab(mode)
+	-- safety: the same mode arriving again changes nothing, and warping the pointer every
+	-- time it arrived would hold a menu's cursor at the middle of the window while the
+	-- player tried to move it
+	if mode == self.cursorGrab then
+		return
+	end
+
+	local previous = self.cursorGrab
 	local eventMask = bit.bor(
 		x11.EventMaskBits.PointerMotion,
 		x11.EventMaskBits.ButtonPress,
@@ -179,7 +201,14 @@ function X11Window:setCursorGrab(mode)
 		x11.warpPointer(self.display, 0, self.id, 0, 0, 0, 0,
 			math.floor(self.width / 2), math.floor(self.height / 2))
 	elseif mode == "none" then
+		-- safety: letting go of a grab leaves the pointer wherever the grab had put it,
+		-- which can be outside the window, so it is brought back into the middle of it
+		-- once, when there was a grab to let go of
 		x11.ungrabPointer(self.display, 0)
+		if previous == "locked" or previous == "contain" then
+			x11.warpPointer(self.display, 0, self.id, 0, 0, 0, 0,
+				math.floor(self.width / 2), math.floor(self.height / 2))
+		end
 	end
 
 	self.cursorGrab = mode
@@ -450,7 +479,11 @@ function X11EventLoop:run(callback)
 					window = window,
 					name = "keyPress",
 					key = key,
-					modifiers = keyModifiers(event.xkey.state)
+					modifiers = keyModifiers(event.xkey.state),
+					-- safety: the text a key types is not the key: a game that reads what a
+					-- player wrote needs the letter the way the keyboard produced it, with
+					-- its case, while a game that reads a binding wants the key itself
+					text = char ~= "" and char or nil
 				}, handler)
 			end
 		end,
