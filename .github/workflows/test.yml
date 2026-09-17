@@ -1,10 +1,8 @@
-name: Tests
+name: Test
 
 on:
   push:
-    branches: [master]
   pull_request:
-    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -12,11 +10,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-22.04
+          - os: ubuntu-22.04-arm
+          - os: windows-latest
+          - os: windows-11-arm
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
-      - uses: lde-org/lde@master
+
+      - name: Setup lde
+        uses: lde-org/setup-lde@master
+        with:
+          version: nightly
 
       - name: Install Xvfb
         if: runner.os == 'Linux'

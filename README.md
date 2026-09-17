@@ -13,5 +13,5 @@ Window creation and handling library in pure LuaJIT.
 Use this package with the [lde](https://lde.sh/) package manager.
 
 ```bash
-lde add --git https://github.com/bycruz/winit
+lde add winit
 ```

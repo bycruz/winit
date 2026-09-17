@@ -1,18 +1,11 @@
 {
 	"name": "winit",
+	"description": "Cross platform windowing library for LuaJIT",
+	"authors": ["David Cruz <david@bycruz.dev>"],
 	"version": "0.1.0",
 	"dependencies": {
-		"x11api": {
-			"git": "https://github.com/bycruz/x11api",
-			"optional": true
-		},
-		"winapi": {
-			"git": "https://github.com/bycruz/winapi",
-			"optional": true
-		}
-	},
-	"devDependencies": {
-		"lde-test": { "git": "https://github.com/lde-org/lde" }
+		"x11api": { "version": "0.1.0", "optional": true },
+		"winapi": { "version": "0.1.0", "optional": true }
 	},
 	"features": {
 		"windows": ["winapi"],
