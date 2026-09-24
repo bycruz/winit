@@ -1,0 +1,9 @@
+{
+	"name": "winit-win32",
+	"description": "The Win32 backend of winit",
+	"authors": ["David Cruz <david@bycruz.dev>"],
+	"version": "0.1.0",
+	"dependencies": {
+		"winapi": { "version": "0.1" }
+	}
+}

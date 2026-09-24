@@ -1,20 +1,11 @@
 local ffi = require("ffi")
 local x11 = require("x11api")
 local xi2 = require("x11api.xi2")
+local wait = require("winit-x11.wait")
+local Clipboard = require("winit-x11.clipboard")
+local Dnd = require("winit-x11.dnd")
 
--- A wait with a time on it, which is what a screen with something to do on its own needs: a caret
--- that blinks is a frame half a second away, and Xlib's own wait -- XNextEvent -- blocks until an
--- event arrives, of which an idle window has none. What it waits on is the socket the display talks
--- on, which `x11.connectionNumber` is.
-ffi.cdef [[
-	struct wlx_pollfd { int fd; short events; short revents; };
-	int poll(struct wlx_pollfd *fds, unsigned long count, int milliseconds);
-]]
-
-local POLLIN = 1
-local waitFds = ffi.new("struct wlx_pollfd[1]")
-
----@class winit.x11.Window: winit.Window
+---@class winit-x11.Window: winit.Window
 ---@field display x11.ffi.Display
 ---@field currentCursor number?
 ---@field blankCursor number?
@@ -25,7 +16,7 @@ local waitFds = ffi.new("struct wlx_pollfd[1]")
 local X11Window = {}
 X11Window.__index = X11Window
 
----@param eventLoop winit.x11.EventLoop
+---@param eventLoop winit-x11.EventLoop
 ---@param width number
 ---@param height number
 function X11Window.new(eventLoop, width, height)
@@ -93,6 +84,11 @@ function X11Window.new(eventLoop, width, height)
 			x11.EventMaskBits.FocusChange
 		)
 	)
+	-- A window is a place files may be dropped on, which is said by a property the program doing
+	-- the dragging reads off it before it starts talking -- so it is set before the window is put
+	-- on screen, where a drag could find it.
+	eventLoop.dnd:aware(window.id)
+
 	x11.mapWindow(display, window.id)
 
 	return window
@@ -281,9 +277,12 @@ function X11Window:acknowledgeSync()
 	self.frameAsked = nil
 end
 
----@class winit.x11.EventLoop: winit.EventLoop
----@field windows table<string, winit.x11.Window>
+---@class winit-x11.EventLoop: winit.EventLoop
+---@field windows table<string, winit-x11.Window>
 ---@field display x11.ffi.Display
+---@field clipboard winit-x11.Clipboard? # The one clipboard made on this loop, whose requests it answers
+---@field dnd winit-x11.Dnd # The drag protocol a drop on a window of this loop is read with
+---@field stashedEvents x11.ffi.Event[] # Events kept back while something was waiting on another program
 local X11EventLoop = {}
 X11EventLoop.__index = X11EventLoop
 
@@ -293,10 +292,19 @@ function X11EventLoop.new()
 		error("Failed to open X11 display")
 	end
 
-	return setmetatable({ display = display, windows = {} }, X11EventLoop)
+	local self = setmetatable({
+		display = display,
+		windows = {},
+		clipboard = nil,
+		stashedEvents = {},
+	}, X11EventLoop)
+
+	self.dnd = Dnd.new(self)
+
+	return self
 end
 
----@param window winit.x11.Window
+---@param window winit-x11.Window
 function X11EventLoop:register(window)
 	self.windows[tostring(window.id)] = window
 end
@@ -404,13 +412,19 @@ function X11EventLoop:run(callback)
 		return dx, dy
 	end
 
-	---@type table<number, fun(window: winit.x11.Window)>
+	---@type table<number, fun(window: winit-x11.Window?)>
 	local Handlers = {
 		[x11.EventType.MotionNotify] = function(window)
 			callback({ window = window, name = "mouseMove", x = event.xmotion.x, y = event.xmotion.y }, handler)
 		end,
 
 		[x11.EventType.ClientMessage] = function(window)
+			-- A drag is a conversation of its own, and it is the source that starts it: what it
+			-- sends is not an event a program hears about until it ends in a drop.
+			if self.dnd:handleClientMessage(window, event, callback, handler) then
+				return
+			end
+
 			if event.xclient.data.l[0] == wmDeleteWindow then
 				callback({ window = window, name = "windowClose" }, handler)
 			elseif event.xclient.data.l[0] == netWmSyncRequest then
@@ -424,6 +438,26 @@ function X11EventLoop:run(callback)
 					window.shouldRedraw = true
 				end
 			end
+		end,
+
+		-- What a program that is pasting something back to us is asking for, and what it tells us
+		-- when the clipboard has changed hands. Neither has a window of its own to be routed by:
+		-- the request names the requestor, and the clipboard is what knows what it holds.
+		[x11.EventType.SelectionRequest] = function()
+			if self.clipboard then
+				self.clipboard:handleRequest(event)
+			end
+		end,
+
+		[x11.EventType.SelectionClear] = function()
+			if self.clipboard then
+				self.clipboard:handleClear(event)
+			end
+		end,
+
+		-- ... and the answer to one of our own asks, which is the files a drop carried
+		[x11.EventType.SelectionNotify] = function()
+			self.dnd:handleSelectionNotify(event, callback, handler)
 		end,
 
 		[x11.EventType.Expose] = function(window)
@@ -580,10 +614,34 @@ function X11EventLoop:run(callback)
 	local redrawEvent = { name = "redraw" }
 	local aboutToWaitEvent = { name = "aboutToWait" }
 
+	--- The event to hand to the handlers: one the loop kept back while something was waiting on
+	--- another program, or the next one the server has -- and whether there was one at all.
+	---@param block boolean # whether to wait on the server when it has nothing for us yet
+	---@param coalesce boolean # whether a motion may swallow the motions queued behind it
+	---@return boolean
+	local function nextEvent(block, coalesce)
+		local kept = self.stashedEvents
+		if #kept > 0 then
+			ffi.copy(event, table.remove(kept, 1), ffi.sizeof(event))
+			return true
+		end
+
+		if not block and x11.pending(display) <= 0 then
+			return false
+		end
+
+		x11.nextEvent(display, event)
+
+		if coalesce and event.type == x11.EventType.MotionNotify then
+			coalesceMouse()
+		end
+
+		return true
+	end
+
 	while isActive do
 		if currentMode == "poll" then
-			while x11.pending(display) > 0 do
-				x11.nextEvent(display, event)
+			while nextEvent(false, false) do
 				processEvent()
 			end
 		elseif timeout then
@@ -594,27 +652,22 @@ function X11EventLoop:run(callback)
 
 			timeout = nil
 
-			waitFds[0].fd = x11.connectionNumber(display)
-			waitFds[0].events = POLLIN
-
 			-- The socket being readable is not the same as there being an event: a reply the
 			-- library has not read yet is data too, and asking it for what it has is what takes it
 			-- -- which is also what keeps the next wait from being woken by the same data again.
-			if ffi.C.poll(waitFds, 1, milliseconds > 0 and milliseconds or 0) > 0 and x11.pending(display) > 0 then
-				x11.nextEvent(display, event)
+			--
+			-- What was kept back is not waited for at all: it is already here, and waiting on a
+			-- socket that has nothing for us would be waiting for a deadline that has nothing to
+			-- do with it.
+			local readable = #self.stashedEvents > 0
+				or wait.readable(display, milliseconds > 0 and milliseconds or 0)
 
-				if event.type == x11.EventType.MotionNotify then
-					coalesceMouse()
-				end
-
+			if readable and nextEvent(false, true) then
 				processEvent()
 			end
 		else
-			x11.nextEvent(display, event)
-			if event.type == x11.EventType.MotionNotify then
-				coalesceMouse()
-			end
-
+			-- Nothing kept back leaves this waiting on the server, which is what this mode is for
+			nextEvent(true, true)
 			processEvent()
 		end
 
@@ -631,4 +684,4 @@ function X11EventLoop:run(callback)
 	end
 end
 
-return { Window = X11Window, EventLoop = X11EventLoop }
+return { Window = X11Window, EventLoop = X11EventLoop, Clipboard = Clipboard }

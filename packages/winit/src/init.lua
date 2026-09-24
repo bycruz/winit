@@ -1,9 +1,27 @@
 local ffi = require("ffi")
 
-local windowBackend =
-	ffi.os == "Windows" and require("winit.raw.win32")
-	or ffi.os == "Linux" and require("winit.raw.x11")
-	or error("Unsupported platform: " .. ffi.os)
+--- The package each platform's backend lives in. Both are named after the platform features
+--- lde turns on by itself, so depending on winit is enough to get one: a program that runs on
+--- linux installs winit-x11 and never winit-win32, and the other way round. The backend a
+--- program does not run on is not installed at all, which is what keeps it out of a bundle --
+--- a whole platform's worth of code that could never run there.
+---@type table<string, string>
+local BACKENDS = {
+	Windows = "winit-win32",
+	Linux = "winit-x11",
+}
+
+local backendPackage = BACKENDS[ffi.os]
+if not backendPackage then
+	error("Unsupported platform: " .. ffi.os)
+end
+
+-- NOTE: This dynamically requires the backend specific module to avoid loading unnecessary code
+local ok, backend = pcall(require, backendPackage)
+if not ok then
+	error("winit was installed without its " .. ffi.os .. " backend (" .. backendPackage
+		.. "): " .. tostring(backend))
+end
 
 ---@alias winit.CursorGrab "locked" | "contain" | "none"
 
@@ -19,7 +37,7 @@ local windowBackend =
 ---@field setCursor fun(self: winit.Window, shape: string)
 ---@field resetCursor fun(self: winit.Window)
 ---@field setCursorGrab fun(self: winit.Window, mode: winit.CursorGrab)
-local Window = windowBackend.Window
+local Window = backend.Window
 
 ---@param eventLoop winit.EventLoop
 function Window.fromEventLoop(eventLoop) ---@return winit.Window
@@ -56,6 +74,20 @@ end
 --- | { window: winit.Window, name: "keyRelease", key: winit.KeyName, modifiers: winit.KeyModifiers, repeated: boolean? }
 --- | { window: winit.Window, name: "focusIn" }
 --- | { window: winit.Window, name: "focusOut" }
+--- | { window: winit.Window, name: "fileDrop", paths: string[], x: number, y: number }
+
+--- A window's clipboard: what a program copies to and pastes from. A platform hands its
+--- clipboard around as a whole, so what this is a handle on is the system's, not a window's --
+--- one of these is what a program wants, and a paste lands wherever the program puts it.
+---
+--- Text is what both platforms agree on, and what a program reading what a player pasted
+--- needs; anything else is a format the two do not name the same way.
+---@class winit.Clipboard
+---@field new fun(eventLoop: winit.EventLoop): winit.Clipboard
+---@field setText fun(self: winit.Clipboard, text: string) # Offer this text to the rest of the system
+---@field getText fun(self: winit.Clipboard): string? # What the clipboard holds, or nothing when it holds no text
+---@field clear fun(self: winit.Clipboard) # Empty the clipboard
+local Clipboard = backend.Clipboard
 
 ---@alias winit.EventLoopMode "poll" | "wait"
 
@@ -74,9 +106,10 @@ end
 ---@field register fun(self: winit.EventLoop, window: winit.Window)
 ---@field close fun(self: winit.EventLoop, window: winit.Window)
 ---@field run fun(self: winit.EventLoop, callback: winit.EventHandler)
-local EventLoop = windowBackend.EventLoop
+local EventLoop = backend.EventLoop
 
 return {
 	EventLoop = EventLoop,
 	Window = Window,
+	Clipboard = Clipboard,
 }

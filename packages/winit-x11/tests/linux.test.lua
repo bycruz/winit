@@ -1,17 +1,22 @@
+local test = require("lde-test")
+
 if jit.os ~= "Linux" then
+	-- An X display is not something this package has another way of getting, and the
+	-- monorepo's tests run every package on every platform: saying so is what keeps this
+	-- file from looking like one that registered nothing at all.
+	test.skip("x11 window tests (skipped: not Linux)")
 	return
 end
 
 local x11 = require("x11api")
-local winit = require("winit")
-local test = require("lde-test")
+local winit = require("winit-x11")
 
 local EventLoop = winit.EventLoop
 local Window = winit.Window
 
 local function setup()
-	local eventLoop = EventLoop.new() ---@cast eventLoop winit.x11.EventLoop
-	local window = Window.new(eventLoop, 800, 600) ---@cast window winit.x11.Window
+	local eventLoop = EventLoop.new() ---@cast eventLoop winit-x11.EventLoop
+	local window = Window.new(eventLoop, 800, 600) ---@cast window winit-x11.Window
 	eventLoop:register(window)
 	x11.flush(eventLoop.display)
 	return eventLoop, window
@@ -47,7 +52,24 @@ test.it("should report correct attributes via X11 API", function()
 	teardown(eventLoop, window)
 end)
 
-test.it("should be visible and have correct geometry via xwininfo", function()
+--- Whether a tool the tests ask about a window is on this machine. What these check is that
+--- the display agrees with a program outside this one about what the window looks like, and
+--- that is a question only such a program can answer.
+---@param name string
+---@return boolean
+local function hasTool(name)
+	local pipe = io.popen("command -v " .. name .. " 2>/dev/null")
+	if not pipe then
+		return false
+	end
+
+	local path = pipe:read("*a")
+	pipe:close()
+
+	return path ~= ""
+end
+
+test.skipIf(not hasTool("xwininfo"))("should be visible and have correct geometry via xwininfo", function()
 	local eventLoop, window = setup()
 	os.execute("sleep 0.1")
 
@@ -68,7 +90,7 @@ test.it("should be visible and have correct geometry via xwininfo", function()
 	teardown(eventLoop, window)
 end)
 
-test.it("should set window title via setTitle", function()
+test.skipIf(not hasTool("xprop"))("should set window title via setTitle", function()
 	local eventLoop, window = setup()
 
 	window:setTitle("winit test window")
@@ -164,7 +186,7 @@ end)
 --- A key event, as the keyboard would make it: sent to the window, which is where the loop reads
 --- them from.
 ---@param display x11.ffi.Display
----@param window winit.x11.Window
+---@param window winit-x11.Window
 ---@param name string # "KeyPress" or "KeyRelease"
 ---@param keycode number
 ---@param state number # The modifiers held, as X masks them
@@ -186,7 +208,7 @@ end
 --- Runs the loop until it has seen `count` keys, and hands back what it saw of them. The events are
 --- sent through the server, so it waits for them to be there: the loop is run in poll mode, which
 --- does not wait for anything by itself.
----@param eventLoop winit.x11.EventLoop
+---@param eventLoop winit-x11.EventLoop
 ---@param count number
 ---@return { name: string, key: string, text: string?, repeated: boolean? }[]
 local function seenKeys(eventLoop, count)
@@ -324,25 +346,9 @@ test.it("should leave the pointer where a menu put it rather than dragging it to
 	teardown(eventLoop, window)
 end)
 
-test.it("should create a window via Window.fromEventLoop with default dimensions", function()
-	local eventLoop = EventLoop.new() ---@cast eventLoop winit.x11.EventLoop
-	local window = Window.fromEventLoop(eventLoop) ---@cast window winit.x11.Window
-
-	test.notEqual(window, nil)
-	test.equal(window.width, 1200)
-	test.equal(window.height, 720)
-
-	local attrs = x11.getWindowAttributes(eventLoop.display, window.id)
-	test.notEqual(attrs, nil)
-	test.equal(attrs.width, 1200)
-	test.equal(attrs.height, 720)
-
-	teardown(eventLoop, window)
-end)
-
 test.it("should set and reset cursor without errors", function()
-	local eventLoop = EventLoop.new() ---@cast eventLoop winit.x11.EventLoop
-	local window = Window.new(eventLoop, 200, 200) ---@cast window winit.x11.Window
+	local eventLoop = EventLoop.new() ---@cast eventLoop winit-x11.EventLoop
+	local window = Window.new(eventLoop, 200, 200) ---@cast window winit-x11.Window
 
 	window:setCursor("pointer")
 	window:setCursor("hand2")

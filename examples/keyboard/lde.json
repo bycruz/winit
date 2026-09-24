@@ -2,6 +2,8 @@
 	"name": "keyboard",
 	"version": "0.1.0",
 	"dependencies": {
-		"winit": { "path": "../.." }
+		"winit": {
+			"path": "../../packages/winit"
+		}
 	}
 }

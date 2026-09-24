@@ -1,6 +1,9 @@
+local ffi = require("ffi")
 local user32 = require("winapi.user32")
 local kernel32 = require("winapi.kernel32")
-local ffi = require("ffi")
+local shell32 = require("winapi.shell32")
+local Clipboard = require("winit-win32.clipboard")
+local readDrop = require("winit-win32.drop")
 
 --- Casts a ffi pointer to a lua number for use as a hash key.
 ---@param value ffi.cdata*
@@ -8,7 +11,7 @@ local function ffiptrToDouble(value)
 	return tonumber(ffi.cast("intptr_t", value))
 end
 
----@class winit.win32.Window: winit.Window
+---@class winit-win32.Window: winit.Window
 ---@field display winapi.user32.ffi.HDC
 ---@field id ffi.cdata*
 ---@field hwnd winapi.user32.ffi.HWND
@@ -16,7 +19,7 @@ end
 local Win32Window = {}
 Win32Window.__index = Win32Window
 
----@param eventLoop winit.win32.EventLoop
+---@param eventLoop winit-win32.EventLoop
 ---@param width number
 ---@param height number
 function Win32Window.new(eventLoop, width, height)
@@ -52,6 +55,10 @@ function Win32Window.new(eventLoop, width, height)
 		error("Failed to create window: " .. kernel32.getLastErrorMessage())
 	end
 
+	-- A window is a place files may be dropped on, which is said rather than assumed: until it
+	-- is, the shell will not send a window the drops it is under.
+	shell32.dragAcceptFiles(window, true)
+
 	return setmetatable({ hwnd = window, id = ffiptrToDouble(window), width = width, height = height }, Win32Window)
 end
 
@@ -81,8 +88,8 @@ function Win32Window:destroy()
 	user32.destroyWindow(self.hwnd)
 end
 
----@class winit.win32.EventLoop: winit.EventLoop
----@field windows table<string, winit.win32.Window>
+---@class winit-win32.EventLoop: winit.EventLoop
+---@field windows table<string, winit-win32.Window>
 ---@field class winapi.user32.ffi.WNDCLASSEXA
 ---@field isActive boolean
 ---@field currentMode "poll" | "wait"
@@ -90,6 +97,15 @@ end
 ---@field callback winit.EventHandler
 local Win32EventLoop = {}
 Win32EventLoop.__index = Win32EventLoop
+
+-- A window class belongs to the process rather than to the loop that made it, and the system
+-- refuses a second one under a name already taken. What each loop registers is a name of its
+-- own, so that making another one -- a second loop in the same program, or a suite that runs
+-- several of them -- is always possible: what a class carries is the window procedure its
+-- windows are dispatched to, and that is the loop's own.
+local classCount = 0
+
+local ERROR_CLASS_ALREADY_EXISTS = 1410
 
 function Win32EventLoop.new()
 	local hInstance = kernel32.getModuleHandle(nil)
@@ -100,13 +116,14 @@ function Win32EventLoop.new()
 	local class = user32.WndClassEx()
 	local self = setmetatable({ class = class, windows = {} }, Win32EventLoop)
 
-	class.lpszClassName = "ArisuWindow"
+	classCount = classCount + 1
+	class.lpszClassName = "winit-window-" .. classCount
 	class.lpfnWndProc = user32.WndProc(function(hwnd, msg, wParam, lParam)
 		if not self.callback then
 			return user32.defWindowProc(hwnd, msg, wParam, lParam)
 		end
 
-		local window = self.windows[ffiptrToDouble(hwnd)]
+		local window = self.windows[tostring(ffiptrToDouble(hwnd))]
 		if not window then
 			return user32.defWindowProc(hwnd, msg, wParam, lParam)
 		end
@@ -148,6 +165,13 @@ function Win32EventLoop.new()
 		elseif msg == user32.WM.CLOSE then
 			self.callback({ window = window, name = "windowClose" }, self.handler)
 			return 0
+		elseif msg == user32.WM.DROPFILES then
+			-- What a drag carried, which the shell hands over as one thing to read the files out
+			-- of and be done with -- so what is passed on is the paths, and the drop itself is
+			-- finished with inside the read.
+			local paths, x, y = readDrop(ffi.cast("HDROP", wParam))
+			self.callback({ window = window, name = "fileDrop", paths = paths, x = x, y = y }, self.handler)
+			return 0
 		end
 
 		return user32.defWindowProc(hwnd, msg, wParam, lParam)
@@ -159,7 +183,25 @@ function Win32EventLoop.new()
 
 	class.hInstance = hInstance
 
-	if user32.registerClass(class) == 0 then
+	-- The names already taken are stepped past rather than counted from this state's own
+	-- beginning: a class belongs to the process, and a second Lua state -- which is what every
+	-- test file of a suite is -- starts counting again from nothing.
+	local registered = false
+	for step = 0, 64 do
+		class.lpszClassName = ("winit-window-%d"):format(classCount + step)
+
+		if user32.registerClass(class) ~= 0 then
+			classCount = classCount + step + 1
+			registered = true
+			break
+		end
+
+		if kernel32.getLastError() ~= ERROR_CLASS_ALREADY_EXISTS then
+			break
+		end
+	end
+
+	if not registered then
 		error("Failed to register window class: " .. kernel32.getLastErrorMessage())
 	end
 
@@ -192,15 +234,18 @@ function Win32EventLoop.new()
 	return self
 end
 
----@param window winit.win32.Window
+---@param window winit-win32.Window
 function Win32EventLoop:register(window)
-	self.windows[window.id] = window
+	-- A window is looked up by what the platform calls it, which on this one is the handle as
+	-- a number: what the loop keeps them under is the same thing the X11 backend keeps them
+	-- under -- a string -- so that a program reading `windows` sees one shape either way.
+	self.windows[tostring(window.id)] = window
 end
 
----@param window winit.win32.Window
+---@param window winit-win32.Window
 function Win32EventLoop:close(window)
 	window:destroy()
-	self.windows[window.id] = nil
+	self.windows[tostring(window.id)] = nil
 end
 
 ---@param callback winit.EventHandler
@@ -252,4 +297,4 @@ function Win32EventLoop:cleanup(hInstance)
 	user32.unregisterClass(self.class.lpszClassName, hInstance)
 end
 
-return { Window = Win32Window, EventLoop = Win32EventLoop }
+return { Window = Win32Window, EventLoop = Win32EventLoop, Clipboard = Clipboard }

@@ -11,8 +11,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
-          - os: ubuntu-22.04-arm
+          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
           - os: windows-latest
           - os: windows-11-arm
 
@@ -25,9 +25,9 @@ jobs:
         with:
           version: nightly
 
-      - name: Install Xvfb
+      - name: Install tools for tests
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils
+        run: sudo apt-get update && sudo apt-get install -y xvfb x11-utils xsel
 
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
