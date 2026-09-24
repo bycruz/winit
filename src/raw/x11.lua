@@ -144,11 +144,6 @@ local function keysymToKey(keysym, char)
 	local named = keysymNames[keysym]
 	if named then return named end
 
-	-- safety: the keysym is which key it is, whatever modifiers are held, while the text
-	-- X hands back is what the combination types: control turns a letter into a control
-	-- character and shift turns it into its capital. Naming a key after the text leaves a
-	-- key held with control named something no game asks about, and its release named
-	-- something else again
 	if keysym >= 0x20 and keysym <= 0x7e then
 		local plain = string.char(keysym)
 		if keysym >= 0x41 and keysym <= 0x5a then
@@ -504,11 +499,12 @@ function X11EventLoop:run(callback)
 		end,
 
 		[x11.EventType.KeyPress] = function(window)
-			local char, keysym = x11.lookupString(event)
-			local key = keysymToKey(tonumber(keysym), char)
+			local char = x11.lookupString(event)
+			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
+			local key = keysymToKey(baseKeysym, char)
 			if key then
 				local repeated = held[event.xkey.keycode] ~= nil
-				held[event.xkey.keycode] = true
+				held[event.xkey.keycode] = key
 
 				callback({
 					window = window,
@@ -527,7 +523,7 @@ function X11EventLoop:run(callback)
 		[x11.EventType.KeyRelease] = function(window)
 			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
 			local baseChar = (baseKeysym >= 0x20 and baseKeysym <= 0x7e) and string.char(baseKeysym) or ""
-			local key = keysymToKey(baseKeysym, baseChar)
+			local key = held[event.xkey.keycode] or keysymToKey(baseKeysym, baseChar)
 
 			local repeated = false
 			if x11.pending(display) > 0 then

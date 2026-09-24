@@ -52,8 +52,8 @@ end
 --- | { window: winit.Window, name: "mouseScroll", dx: number, dy: number }
 --- | { window: winit.Window, name: "mousePress", x: number, y: number, button: number }
 --- | { window: winit.Window, name: "mouseRelease", x: number, y: number, button: number }
---- | { window: winit.Window, name: "keyPress", key: winit.KeyName, modifiers: winit.KeyModifiers, text: string?, repeated: boolean? } # `repeated` where the keyboard is repeating the key itself, rather than a hand making the press
---- | { window: winit.Window, name: "keyRelease", key: winit.KeyName, modifiers: winit.KeyModifiers, repeated: boolean? } # `repeated` where the release is the one the keyboard's own repeat of a held key comes with, rather than a hand coming off it
+--- | { window: winit.Window, name: "keyPress", key: winit.KeyName, modifiers: winit.KeyModifiers, text: string?, repeated: boolean? }
+--- | { window: winit.Window, name: "keyRelease", key: winit.KeyName, modifiers: winit.KeyModifiers, repeated: boolean? }
 --- | { window: winit.Window, name: "focusIn" }
 --- | { window: winit.Window, name: "focusOut" }
 

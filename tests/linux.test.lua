@@ -161,6 +161,145 @@ test.it("should name a key after the key and not after the text a modifier makes
 	teardown(eventLoop, window)
 end)
 
+--- A key event, as the keyboard would make it: sent to the window, which is where the loop reads
+--- them from.
+---@param display x11.ffi.Display
+---@param window winit.x11.Window
+---@param name string # "KeyPress" or "KeyRelease"
+---@param keycode number
+---@param state number # The modifiers held, as X masks them
+---@param at number? # And the time the server would stamp it with
+local function sendKey(display, window, name, keycode, state, at)
+	local event = x11.Event()
+
+	event.type = name == "KeyPress" and x11.EventType.KeyPress or x11.EventType.KeyRelease
+	event.xkey.window = window.id
+	event.xkey.keycode = keycode
+	event.xkey.state = state
+	event.xkey.time = at or 0
+
+	x11.sendEvent(display, window.id, x11.False,
+		name == "KeyPress" and x11.EventMaskBits.KeyPress or x11.EventMaskBits.KeyRelease, event)
+	x11.flush(display)
+end
+
+--- Runs the loop until it has seen `count` keys, and hands back what it saw of them. The events are
+--- sent through the server, so it waits for them to be there: the loop is run in poll mode, which
+--- does not wait for anything by itself.
+---@param eventLoop winit.x11.EventLoop
+---@param count number
+---@return { name: string, key: string, text: string?, repeated: boolean? }[]
+local function seenKeys(eventLoop, count)
+	local display = eventLoop.display
+	local seen = {}
+	local frames = 0
+
+	for _ = 1, 100000 do
+		if x11.pending(display) >= count then break end
+	end
+
+	eventLoop:run(function(event, handler)
+		handler:setMode("poll")
+		frames = frames + 1
+
+		if event.name == "keyPress" or event.name == "keyRelease" then
+			seen[#seen + 1] = {
+				name = event.name,
+				key = event.key,
+				text = event.text,
+				repeated = event.repeated,
+			}
+		end
+
+		if #seen >= count or frames > 60 then
+			handler:exit()
+		end
+	end)
+
+	return seen
+end
+
+test.it("should name a shifted key after the key, and say what it types as the text", function()
+	local eventLoop, window = setup()
+	local display = eventLoop.display
+
+	-- the key 1 with shift held, which types "!" -- the key is the key, and what it types is the text
+	local keycode = keycodeOf(display, 0x31)
+
+	sendKey(display, window, "KeyPress", keycode, 1) -- ShiftMask
+	sendKey(display, window, "KeyRelease", keycode, 1)
+
+	local seen = seenKeys(eventLoop, 2)
+
+	test.equal(#seen, 2, "the press and the release are both reported")
+	test.equal(seen[1].key, "1", "the press is named after the key")
+	test.equal(seen[1].text, "!", "and what it types is the text")
+	test.equal(seen[2].key, "1", "the release is named after the same key as the press")
+
+	teardown(eventLoop, window)
+end)
+
+test.it("should say which presses and releases are the keyboard's own repeat", function()
+	local eventLoop, window = setup()
+	local display = eventLoop.display
+	local keycode = keycodeOf(display, 0x62) -- the key b
+
+	-- what a keyboard repeating a key it is holding sends: a release and a press of it together,
+	-- with the same keycode and the same time. Sent before the loop runs, so that the press is in
+	-- the queue when the release is read -- which is what it is read against.
+	sendKey(display, window, "KeyPress", keycode, 0, 100)
+	sendKey(display, window, "KeyRelease", keycode, 0, 100)
+	sendKey(display, window, "KeyPress", keycode, 0, 100)
+
+	local seen = seenKeys(eventLoop, 3)
+
+	test.equal(#seen, 3, "all three are reported")
+	test.equal(seen[1].name, "keyPress")
+	test.equal(seen[1].repeated, nil, "the first press is a hand making it")
+	test.equal(seen[2].name, "keyRelease")
+	test.equal(seen[2].repeated, true, "the release a repeat comes with says so")
+	test.equal(seen[3].name, "keyPress")
+	test.equal(seen[3].repeated, true, "and the press of that repeat says so")
+
+	-- A release of its own, with nothing behind it: the key is up, and the next press is a hand's.
+	sendKey(display, window, "KeyRelease", keycode, 0, 200)
+	sendKey(display, window, "KeyPress", keycode, 0, 300)
+
+	local alone = seenKeys(eventLoop, 2)
+
+	test.equal(alone[1].name, "keyRelease")
+	test.equal(alone[1].repeated, nil, "a release on its own is a key coming up")
+	test.equal(alone[2].repeated, nil, "and the press after it is a hand making it")
+
+	teardown(eventLoop, window)
+end)
+
+test.it("should name a release after the press it belongs to, whatever the key is", function()
+	local eventLoop, window = setup()
+	local display = eventLoop.display
+
+	-- a keypad key: its keycode names nothing on its own and types nothing when it comes up, so what
+	-- a release of it is called is what its press was called. Skipped where the keyboard has no
+	-- keypad to speak of.
+	local ok, keycode = pcall(keycodeOf, display, 0xffb1) -- KP_1
+
+	if not ok then
+		teardown(eventLoop, window)
+		return
+	end
+
+	sendKey(display, window, "KeyPress", keycode, 0)
+	sendKey(display, window, "KeyRelease", keycode, 0)
+
+	local seen = seenKeys(eventLoop, 2)
+
+	test.equal(#seen, 2, "the press and the release are both reported")
+	test.equal(seen[2].key, seen[1].key, "and the release is named what the press was named")
+	test.equal(seen[2].name, "keyRelease")
+
+	teardown(eventLoop, window)
+end)
+
 test.it("should leave the pointer where a menu put it rather than dragging it to the middle", function()
 	local eventLoop, window = setup()
 	local display = eventLoop.display
