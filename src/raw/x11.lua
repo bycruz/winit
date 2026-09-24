@@ -2,6 +2,18 @@ local ffi = require("ffi")
 local x11 = require("x11api")
 local xi2 = require("x11api.xi2")
 
+-- A wait with a time on it, which is what a screen with something to do on its own needs: a caret
+-- that blinks is a frame half a second away, and Xlib's own wait -- XNextEvent -- blocks until an
+-- event arrives, of which an idle window has none. What it waits on is the socket the display talks
+-- on, which `x11.connectionNumber` is.
+ffi.cdef [[
+	struct wlx_pollfd { int fd; short events; short revents; };
+	int poll(struct wlx_pollfd *fds, unsigned long count, int milliseconds);
+]]
+
+local POLLIN = 1
+local waitFds = ffi.new("struct wlx_pollfd[1]")
+
 ---@class winit.x11.Window: winit.Window
 ---@field display x11.ffi.Display
 ---@field currentCursor number?
@@ -314,6 +326,7 @@ function X11EventLoop:run(callback)
 
 	local isActive = true
 	local currentMode = "poll"
+	local timeout = nil ---@type number?
 
 	---@type winit.EventManager
 	local handler = {}
@@ -324,6 +337,14 @@ function X11EventLoop:run(callback)
 
 		function handler:setMode(mode)
 			currentMode = mode
+		end
+
+		--- How long the next wait may last, in seconds, or nothing to wait out an event with no
+		--- end to it. One wait: a deadline is what a screen with something to do on its own asks
+		--- for, and it asks again for the next one. See `winit.EventManager:setTimeout`.
+		---@param seconds number?
+		function handler:setTimeout(seconds)
+			timeout = seconds
 		end
 
 		function handler:requestRedraw(window)
@@ -544,6 +565,29 @@ function X11EventLoop:run(callback)
 		if currentMode == "poll" then
 			while x11.pending(display) > 0 do
 				x11.nextEvent(display, event)
+				processEvent()
+			end
+		elseif timeout then
+			-- Woken by an event or by the time it was asked to be back at, and the iteration goes on
+			-- either way: what is left of it is the redraw that is owed, and telling the app that
+			-- the loop is about to wait again.
+			local milliseconds = math.ceil(timeout * 1000)
+
+			timeout = nil
+
+			waitFds[0].fd = x11.connectionNumber(display)
+			waitFds[0].events = POLLIN
+
+			-- The socket being readable is not the same as there being an event: a reply the
+			-- library has not read yet is data too, and asking it for what it has is what takes it
+			-- -- which is also what keeps the next wait from being woken by the same data again.
+			if ffi.C.poll(waitFds, 1, milliseconds > 0 and milliseconds or 0) > 0 and x11.pending(display) > 0 then
+				x11.nextEvent(display, event)
+
+				if event.type == x11.EventType.MotionNotify then
+					coalesceMouse()
+				end
+
 				processEvent()
 			end
 		else

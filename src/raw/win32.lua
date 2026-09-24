@@ -173,6 +173,11 @@ function Win32EventLoop.new()
 			self.currentMode = mode
 		end
 
+		--- A wait with a deadline is not in this backend: a screen with something to do on its own
+		--- is woken by the events it is given and no earlier.
+		---@param seconds number?
+		function handler.setTimeout(_, seconds) end
+
 		function handler.requestRedraw(_, window)
 			window.shouldRedraw = true
 		end

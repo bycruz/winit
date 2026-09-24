@@ -64,6 +64,7 @@ end
 ---@field close fun(self, window: winit.Window)
 ---@field requestRedraw fun(self, window: winit.Window)
 ---@field setMode fun(self, mode: winit.EventLoopMode)
+---@field setTimeout fun(self, seconds: number?) # How long the next wait may last, or nothing to wait out an event
 
 ---@alias winit.EventHandler fun(event: winit.Event, handler: winit.EventManager)
 
