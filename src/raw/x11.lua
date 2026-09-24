@@ -328,6 +328,9 @@ function X11EventLoop:run(callback)
 	local currentMode = "poll"
 	local timeout = nil ---@type number?
 
+	---@type table<number, true>
+	local held = {}
+
 	---@type winit.EventManager
 	local handler = {}
 	do
@@ -496,6 +499,7 @@ function X11EventLoop:run(callback)
 		end,
 
 		[x11.EventType.FocusOut] = function(window)
+			held = {}
 			callback({ window = window, name = "focusOut" }, handler)
 		end,
 
@@ -503,6 +507,9 @@ function X11EventLoop:run(callback)
 			local char, keysym = x11.lookupString(event)
 			local key = keysymToKey(tonumber(keysym), char)
 			if key then
+				local repeated = held[event.xkey.keycode] ~= nil
+				held[event.xkey.keycode] = true
+
 				callback({
 					window = window,
 					name = "keyPress",
@@ -511,7 +518,8 @@ function X11EventLoop:run(callback)
 					-- safety: the text a key types is not the key: a game that reads what a
 					-- player wrote needs the letter the way the keyboard produced it, with
 					-- its case, while a game that reads a binding wants the key itself
-					text = char ~= "" and char or nil
+					text = char ~= "" and char or nil,
+					repeated = repeated and true or nil
 				}, handler)
 			end
 		end,
@@ -520,12 +528,27 @@ function X11EventLoop:run(callback)
 			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
 			local baseChar = (baseKeysym >= 0x20 and baseKeysym <= 0x7e) and string.char(baseKeysym) or ""
 			local key = keysymToKey(baseKeysym, baseChar)
+
+			local repeated = false
+			if x11.pending(display) > 0 then
+				x11.peekEvent(display, tempEvent)
+
+				repeated = tempEvent.type == x11.EventType.KeyPress
+					and tempEvent.xkey.keycode == event.xkey.keycode
+					and tempEvent.xkey.time == event.xkey.time
+			end
+
+			if not repeated then
+				held[event.xkey.keycode] = nil
+			end
+
 			if key then
 				callback({
 					window = window,
 					name = "keyRelease",
 					key = key,
-					modifiers = keyModifiers(event.xkey.state)
+					modifiers = keyModifiers(event.xkey.state),
+					repeated = repeated and true or nil
 				}, handler)
 			end
 		end,
