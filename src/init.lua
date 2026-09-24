@@ -12,6 +12,7 @@ local windowBackend =
 ---@field width number
 ---@field height number
 ---@field shouldRedraw boolean
+---@field frameAsked boolean? # The window manager asked for a frame, and waits to be told it is ready
 ---@field new fun(eventLoop: winit.EventLoop, width: number, height: number): winit.Window
 ---@field destroy fun(self: winit.Window)
 ---@field setTitle fun(self: winit.Window, title: string)

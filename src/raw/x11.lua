@@ -270,6 +270,8 @@ function X11Window:acknowledgeSync()
 		x11.syncSetCounter(self.display, self.syncCounter, value)
 		self.syncPendingLo, self.syncPendingHi = nil, nil
 	end
+
+	self.frameAsked = nil
 end
 
 ---@class winit.x11.EventLoop: winit.EventLoop
@@ -396,6 +398,11 @@ function X11EventLoop:run(callback)
 				if window and window.syncCounter then
 					window.syncPendingLo = bit.band(event.xclient.data.l[2], 0xFFFFFFFF)
 					window.syncPendingHi = bit.band(event.xclient.data.l[3], 0xFFFFFFFF)
+				end
+
+				if window then
+					window.frameAsked = true
+					window.shouldRedraw = true
 				end
 			end
 		end,
