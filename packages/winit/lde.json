@@ -5,10 +5,12 @@
 	"version": "0.1.6",
 	"dependencies": {
 		"winit-x11": { "path": "../winit-x11", "optional": true },
-		"winit-win32": { "path": "../winit-win32", "optional": true }
+		"winit-win32": { "path": "../winit-win32", "optional": true },
+		"winit-macos": { "path": "../winit-macos", "optional": true }
 	},
 	"features": {
 		"linux": ["winit-x11"],
-		"windows": ["winit-win32"]
+		"windows": ["winit-win32"],
+		"macos": ["winit-macos"]
 	}
 }

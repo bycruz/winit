@@ -9,6 +9,7 @@ local ffi = require("ffi")
 local BACKENDS = {
 	Windows = "winit-win32",
 	Linux = "winit-x11",
+	OSX = "winit-macos",
 }
 
 local backendPackage = BACKENDS[ffi.os]

@@ -17,7 +17,11 @@ test.it("should hand a program the backend of the platform it runs on", function
 	-- Both backends' packages are here in the monorepo, and a program installs one of them:
 	-- what it is handed is that one's classes, not a wrapper this package keeps in front of
 	-- them -- a window of a program is the backend's own, down to the fields on it.
-	local backend = jit.os == "Windows" and require("winit-win32") or require("winit-x11")
+	local backend = require(({
+		Windows = "winit-win32",
+		Linux = "winit-x11",
+		OSX = "winit-macos"
+	})[jit.os])
 
 	test.equal(winit.Window, backend.Window)
 	test.equal(winit.EventLoop, backend.EventLoop)

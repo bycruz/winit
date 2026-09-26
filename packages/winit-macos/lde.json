@@ -1,0 +1,6 @@
+{
+	"name": "winit-macos",
+	"description": "The macOS backend of winit",
+	"authors": ["David Cruz <david@bycruz.dev>"],
+	"version": "0.1.0"
+}
