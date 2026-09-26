@@ -107,6 +107,17 @@ local classCount = 0
 
 local ERROR_CLASS_ALREADY_EXISTS = 1410
 
+---@param loop winit-win32.EventLoop
+---@param callback winit.EventHandler
+local function deliverRedraws(loop, callback)
+	for _, window in pairs(loop.windows) do
+		if window.shouldRedraw then
+			window.shouldRedraw = false
+			callback({ name = "redraw", window = window }, loop.handler)
+		end
+	end
+end
+
 function Win32EventLoop.new()
 	local hInstance = kernel32.getModuleHandle(nil)
 	if hInstance == nil then
@@ -128,16 +139,23 @@ function Win32EventLoop.new()
 			return user32.defWindowProc(hwnd, msg, wParam, lParam)
 		end
 
-		if msg == user32.WM.PAINT then
+		if msg == user32.WM.ERASEBKGND then
+			-- Nothing is erased behind a frame: what a window of this is, is what the app draws in
+			-- it, and filling it with the system's own colour first is what a white flash under a
+			-- frame being resized is.
+			return 1
+		elseif msg == user32.WM.PAINT then
 			self.callback({ name = "redraw", window = window }, self.handler)
 			return 0
 		elseif msg == user32.WM.SIZE then
 			if window then
-				window.width = user32.LOWORD(lParam)
-				window.height = user32.HIWORD(lParam)
+				window.width = tonumber(user32.LOWORD(lParam))
+				window.height = tonumber(user32.HIWORD(lParam))
 			end
 
 			self.callback({ name = "resize", window = window }, self.handler)
+
+			deliverRedraws(self, self.callback)
 			return 0
 		elseif msg == 0x0018 then -- WM_SHOWWINDOW
 			if user32.LOWORD(wParam) ~= 0 then
@@ -178,7 +196,8 @@ function Win32EventLoop.new()
 	end)
 	class.hCursor = user32.loadCursor(nil, user32.IDC.ARROW)
 	class.hIcon = user32.loadIcon(nil, user32.IDI.APPLICATION)
-	class.hbrBackground = user32.getSysColorBrush(user32.COLOR.WINDOW)
+
+	class.hbrBackground = nil
 	class.style = bit.bor(user32.CS.HREDRAW, user32.CS.VREDRAW)
 
 	class.hInstance = hInstance
@@ -277,12 +296,7 @@ function Win32EventLoop:run(callback)
 			user32.dispatchMessage(msg)
 		end
 
-		for _, window in pairs(self.windows) do
-			if window.shouldRedraw then
-				window.shouldRedraw = false
-				callback({ name = "redraw", window = window }, self.handler)
-			end
-		end
+		deliverRedraws(self, callback)
 
 		callback({ name = "aboutToWait" }, self.handler)
 	end
