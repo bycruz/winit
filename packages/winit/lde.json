@@ -2,7 +2,7 @@
 	"name": "winit",
 	"description": "Cross platform windowing library for LuaJIT",
 	"authors": ["David Cruz <david@bycruz.dev>"],
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"dependencies": {
 		"winit-x11": { "path": "../winit-x11", "optional": true },
 		"winit-win32": { "path": "../winit-win32", "optional": true },

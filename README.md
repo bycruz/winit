@@ -4,9 +4,9 @@ Window creation and handling library in pure LuaJIT.
 
 ## Support
 
-| Arch   | Windows | Linux | macOS |
-| ------ | ------- | ----- | ----- |
-| x86-64 | ✅      | ✅    | ✅    |
+| Windows | Linux | macOS |
+| ------- | ----- | ----- |
+| ✅      | ✅    | ✅    |
 
 ## Installation
 
