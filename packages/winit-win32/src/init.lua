@@ -16,6 +16,9 @@ end
 ---@field id ffi.cdata*
 ---@field hwnd winapi.user32.ffi.HWND
 ---@field currentCursor ffi.cdata*?
+---@field width number
+---@field height number
+---@field shouldRedraw boolean?
 local Win32Window = {}
 Win32Window.__index = Win32Window
 
@@ -23,6 +26,7 @@ Win32Window.__index = Win32Window
 ---@param width number
 ---@param height number
 function Win32Window.new(eventLoop, width, height)
+	---@cast eventLoop winit-win32.EventLoop
 	-- We need to adjust the window size to account for borders and title bar
 	-- This is specific to windows as the width and height when creating a window isn't just the client area.
 	local rect = user32.Rect()
@@ -41,8 +45,8 @@ function Win32Window.new(eventLoop, width, height)
 		eventLoop.class.lpszClassName,
 		"Title",
 		bit.bor(user32.WS.VISIBLE, user32.WS.OVERLAPPEDWINDOW),
-		user32.CW_USEDEFAULT,
-		user32.CW_USEDEFAULT,
+		0x80000000,
+		0x80000000,
 		adjustedWidth,
 		adjustedHeight,
 		nil,
@@ -59,20 +63,27 @@ function Win32Window.new(eventLoop, width, height)
 	-- is, the shell will not send a window the drops it is under.
 	shell32.dragAcceptFiles(window, true)
 
-	return setmetatable({ hwnd = window, id = ffiptrToDouble(window), width = width, height = height }, Win32Window)
+	local made = setmetatable({ hwnd = window, id = ffiptrToDouble(window), width = width,
+		height = height }, Win32Window)
+	made.cursors = { text = true}
+	return made
 end
 
+---@type table<string, integer>
 local cursors = {
 	pointer = user32.IDC.ARROW,
 	hand2 = user32.IDC.HAND,
+	text = ffi.cast("LPCSTR", 32513), -- IDC_IBEAM
 }
 
----@param shape "pointer" | "hand2"
+---@param shape "pointer" | "hand2" | "text"
+---@return nil
 function Win32Window:setCursor(shape)
 	local idc = assert(cursors[shape], "Unknown cursor shape: " .. tostring(shape))
-	local cursor = user32.loadCursor(nil, idc)
+	local cursor = user32.loadCursor(nil, ffi.cast("LPCSTR", idc))
 	user32.setCursor(cursor)
 	self.currentCursor = cursor
+	return nil
 end
 
 function Win32Window:resetCursor()
@@ -80,9 +91,12 @@ function Win32Window:resetCursor()
 end
 
 ---@param title string
+---@return nil
 function Win32Window:setTitle(title)
 	user32.setWindowText(self.hwnd, title)
+	return nil
 end
+
 
 function Win32Window:destroy()
 	user32.destroyWindow(self.hwnd)
@@ -129,7 +143,7 @@ function Win32EventLoop.new()
 
 	classCount = classCount + 1
 	class.lpszClassName = "winit-window-" .. classCount
-	class.lpfnWndProc = user32.WndProc(function(hwnd, msg, wParam, lParam)
+	class.lpfnWndProc = ffi.cast("WNDPROC", user32.WndProc(function(hwnd, msg, wParam, lParam)
 		if not self.callback then
 			return user32.defWindowProc(hwnd, msg, wParam, lParam)
 		end
@@ -149,8 +163,8 @@ function Win32EventLoop.new()
 			return 0
 		elseif msg == user32.WM.SIZE then
 			if window then
-				window.width = tonumber(user32.LOWORD(lParam))
-				window.height = tonumber(user32.HIWORD(lParam))
+				window.width = assert(tonumber(user32.LOWORD(lParam)))
+				window.height = assert(tonumber(user32.HIWORD(lParam)))
 			end
 
 			self.callback({ name = "resize", window = window }, self.handler)
@@ -193,11 +207,11 @@ function Win32EventLoop.new()
 		end
 
 		return user32.defWindowProc(hwnd, msg, wParam, lParam)
-	end)
-	class.hCursor = user32.loadCursor(nil, user32.IDC.ARROW)
-	class.hIcon = user32.loadIcon(nil, user32.IDI.APPLICATION)
+	end))
+	class.hCursor = user32.loadCursor(nil, ffi.cast("LPCSTR", user32.IDC.ARROW))
+	class.hIcon = user32.loadIcon(nil, ffi.cast("LPCSTR", user32.IDI.APPLICATION))
 
-	class.hbrBackground = nil
+	class.hbrBackground = ffi.cast("void*", nil)
 	class.style = bit.bor(user32.CS.HREDRAW, user32.CS.VREDRAW)
 
 	class.hInstance = hInstance
@@ -230,6 +244,7 @@ function Win32EventLoop.new()
 			self.isActive = false
 		end
 
+		---@param mode "poll" | "wait"
 		function handler.setMode(_, mode)
 			self.currentMode = mode
 		end
@@ -239,10 +254,12 @@ function Win32EventLoop.new()
 		---@param seconds number?
 		function handler.setTimeout(_, seconds) end
 
+		---@param window winit-win32.Window
 		function handler.requestRedraw(_, window)
 			window.shouldRedraw = true
 		end
 
+		---@param window winit.Window
 		function handler.close(_, window)
 			self:close(window)
 		end
@@ -253,15 +270,17 @@ function Win32EventLoop.new()
 	return self
 end
 
----@param window winit-win32.Window
+---@param window winit.Window
+---@return nil
 function Win32EventLoop:register(window)
 	-- A window is looked up by what the platform calls it, which on this one is the handle as
 	-- a number: what the loop keeps them under is the same thing the X11 backend keeps them
 	-- under -- a string -- so that a program reading `windows` sees one shape either way.
 	self.windows[tostring(window.id)] = window
+	return nil
 end
 
----@param window winit-win32.Window
+---@param window winit.Window
 function Win32EventLoop:close(window)
 	window:destroy()
 	self.windows[tostring(window.id)] = nil

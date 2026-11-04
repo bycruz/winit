@@ -18,9 +18,10 @@ local Window = winit.Window
 local Clipboard = winit.Clipboard
 
 -- Fixture to ensure clean window class state
+---@param fn fun(eventLoop: winit-win32.EventLoop)
 local function withEventLoop(fn)
 	local hInstance = kernel32.getModuleHandle(nil)
-	local eventLoop = EventLoop.new()
+	local eventLoop = EventLoop.new() ---@cast eventLoop winit-win32.EventLoop
 
 	local ok, err = pcall(fn, eventLoop)
 
@@ -123,6 +124,8 @@ test.it("runs event loop and receives aboutToWait event", function()
 		local eventCount = 0
 
 		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
 			handler:setMode("poll")
 			eventCount = eventCount + 1
 			events[event.name] = true
@@ -211,11 +214,12 @@ end)
 ---@param y number
 ---@return winapi.shell32.ffi.HDROP
 local function makeDrop(paths, x, y)
+	---@type ffi.ptr<ffi.wchar_t>[]
 	local wides = {}
 	local units = 1
 
 	for i, path in ipairs(paths) do
-		local wide = kernel32.utf8ToWide(path)
+		local wide = ffi.cast("wchar_t*", assert(kernel32.utf8ToWide(path)))
 		wides[i] = wide
 
 		local characters = 0
@@ -234,6 +238,7 @@ local function makeDrop(paths, x, y)
 	local block = kernel32.globalLock(handle)
 	---@cast block -nil
 
+	---@type { pFiles: number, pt: { x: number, y: number }, fNC: number, fWide: number }
 	local header = ffi.cast("DROPFILES *", block)
 	header.pFiles = headerSize
 	header.pt.x = x
@@ -244,7 +249,7 @@ local function makeDrop(paths, x, y)
 	-- reads; the older name-only form is what this says not to expect.
 	header.fWide = 1
 
-	local names = ffi.cast("char *", block) + headerSize
+	local names = ffi.cast("char *", block) + headerSize --[[@as ffi.ptr<ffi.char>]]
 	local at = 0
 
 	for _, wide in ipairs(wides) do
@@ -276,10 +281,13 @@ test.it("reports the files a drop carried, and where it was let go of", function
 		local drop = makeDrop({ "C:\\Users\\Viola\\one.txt", "C:\\Users\\Viola\\two words.txt" }, 12, 34)
 		test.equal(user32.postMessage(window.hwnd, user32.WM.DROPFILES, ffi.cast("uintptr_t", drop), 0), true)
 
+		---@type winit.Event?
 		local dropped = nil
 		local frames = 0
 
 		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
 			handler:setMode("poll")
 
 			if event.name == "fileDrop" then
@@ -308,7 +316,6 @@ end)
 --- the exchange below a real one rather than this process talking to itself. What is asked of
 --- it is that it runs and says something: where it is missing, the shell writes the bad
 --- command to the stream sent nowhere and there is nothing to read.
----@return boolean
 local function hasPowerShell()
 	local pipe = io.popen("powershell -NoProfile -Command \"Write-Output winit\" 2>nul")
 	if not pipe then

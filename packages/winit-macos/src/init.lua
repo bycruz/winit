@@ -116,7 +116,6 @@ local keyNames = {
 --- types a control character, and the arrows and the function keys are not characters at all: this
 --- platform says them in the private use area, which is one of the ranges a program never shows.
 ---@param characters string
----@return string?
 local function textFor(characters)
 	if #characters == 0 then
 		return nil
@@ -148,7 +147,6 @@ local modifierBits = {
 }
 
 ---@param flags number
----@return winit.KeyModifiers
 local function modifiersOf(flags)
 	return {
 		shift = bit.band(flags, modifierBits.shift) ~= 0,
@@ -163,7 +161,7 @@ end
 --- between the other two here rather than after them.
 local mouseButtons = { [0] = 1, [1] = 3, [2] = 2 }
 
-local cursorShapes = { pointer = 0, hand2 = 1 }
+local cursorShapes = { pointer = 0, hand2 = 1, text = 2 }
 local cursorGrabs = { none = 0, contain = 1, locked = 2 }
 
 ---@class winit-macos.Window: winit.Window
@@ -182,15 +180,20 @@ function MacWindow.new(eventLoop, width, height)
 		error("Failed to create window: this machine has no screen to put one on")
 	end
 
-	return setmetatable({ id = id, width = width, height = height }, MacWindow)
+	local made = setmetatable({ id = id, width = width, height = height }, MacWindow)
+	made.cursors = { text = true}
+	return made
 end
 
 ---@param title string
+---@return nil
 function MacWindow:setTitle(title)
 	shim.winit_macos_window_set_title(self.id, title)
+	return nil
 end
 
 ---@param shape string
+---@return nil
 function MacWindow:setCursor(shape)
 	local identified = cursorShapes[shape]
 
@@ -199,6 +202,7 @@ function MacWindow:setCursor(shape)
 	end
 
 	shim.winit_macos_window_set_cursor(self.id, identified)
+	return nil
 end
 
 function MacWindow:resetCursor()
@@ -206,11 +210,12 @@ function MacWindow:resetCursor()
 end
 
 ---@param mode winit.CursorGrab
+---@return nil
 function MacWindow:setCursorGrab(mode)
 	-- safety: the same mode arriving again changes nothing, and a program that asks for the pointer
 	-- to be held every frame is one asking the pointer to be put back where it is.
 	if mode == self.cursorGrab then
-		return
+		return nil
 	end
 
 	local identified = cursorGrabs[mode]
@@ -238,6 +243,8 @@ end
 ---@field currentMode "poll" | "wait"
 ---@field timeout number?
 ---@field event winit_macos_event
+---@field handler winit.EventManager
+---@field callback winit.EventHandler?
 local MacEventLoop = {}
 MacEventLoop.__index = MacEventLoop
 
@@ -264,8 +271,10 @@ function MacEventLoop.new()
 		--- to it. One wait: a deadline is what a screen with something to do on its own asks for,
 		--- and it asks again for the next one. See `winit.EventManager:setTimeout`.
 		---@param seconds number?
+		---@return nil
 		function handler.setTimeout(_, seconds)
 			self.timeout = seconds
+			return nil
 		end
 
 		function handler.requestRedraw(_, window)
@@ -282,17 +291,21 @@ function MacEventLoop.new()
 	return self
 end
 
----@param window winit-macos.Window
+---@param window winit.Window
+---@return nil
 function MacEventLoop:register(window)
 	-- Windows are kept under the id the platform gives them, as a string: what a program reading
 	-- `windows` sees is one shape whichever backend is behind it.
 	self.windows[tostring(window.id)] = window
+	return nil
 end
 
----@param window winit-macos.Window
+---@param window winit.Window
+---@return nil
 function MacEventLoop:close(window)
 	window:destroy()
 	self.windows[tostring(window.id)] = nil
+	return nil
 end
 
 ---@param event winit_macos_event
@@ -374,6 +387,7 @@ function MacEventLoop:dispatch(event)
 end
 
 ---@param callback winit.EventHandler
+---@return nil
 function MacEventLoop:run(callback)
 	self.isActive = true
 	self.currentMode = "poll"
@@ -430,6 +444,7 @@ function MacEventLoop:run(callback)
 	for _, window in pairs(self.windows) do
 		self:close(window)
 	end
+	return nil
 end
 
 --- A clipboard on this platform is the system's own, held as a whole and named by what it holds
@@ -447,10 +462,12 @@ function MacClipboard.new(eventLoop)
 end
 
 ---@param text string
+---@return nil
 function MacClipboard:setText(text)
 	if shim.winit_macos_clipboard_set(text) ~= 0 then
 		error("Failed to put text on the clipboard")
 	end
+	return nil
 end
 
 ---@return string?

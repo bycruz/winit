@@ -8,8 +8,8 @@ local wait = require("winit-x11.wait")
 --- clipboard is taken to hold nothing, which is something a program can carry on from.
 local REPLY_TIMEOUT = 1.0
 
----@class winit-x11.Clipboard: winit.Clipboard
----@field display x11.ffi.Display
+---@class winit-x11.Clipboard
+---@field display XDisplay
 ---@field eventLoop winit-x11.EventLoop
 ---@field window number # The unmapped window that owns the clipboard and answers for it
 ---@field text string? # What this clipboard is offering, or nothing when it offers nothing
@@ -36,7 +36,6 @@ end
 --- is two. A clipboard asked for the older target is answered in it, so what comes back is
 --- converted rather than handed over as bytes that would read as mojibake.
 ---@param text string
----@return string
 local function latin1ToUtf8(text)
 	local converted = {}
 
@@ -55,7 +54,6 @@ end
 --- Whether text is bytes the older STRING target can carry as they are: it holds Latin-1, and
 --- UTF-8 bytes only read as Latin-1 when they are the first 127 of them.
 ---@param text string
----@return boolean
 local function isAscii(text)
 	return text:find("[\128-\255]") == nil
 end
@@ -64,13 +62,14 @@ end
 ---@return winit-x11.Clipboard
 function Clipboard.new(eventLoop)
 	local display = eventLoop.display
-	local root = x11.defaultRootWindow(display)
+	local displayPtr = ffi.cast("void*", display)
+	local root = x11.defaultRootWindow(displayPtr)
 
 	-- A selection is offered by a window, and the requests for it arrive as events, so the
 	-- clipboard needs one of its own: the loop is where those are read, and a window nobody
 	-- meant to see is the one thing that belongs to the clipboard itself rather than to any
 	-- window a program put on screen -- a paste is a paste wherever it lands.
-	local window = x11.createSimpleWindow(display, root, 0, 0, 1, 1, 0, 0, 0)
+	local window = x11.createSimpleWindow(displayPtr, root, 0, 0, 1, 1, 0, 0, 0)
 	if window == 0 then
 		error("Failed to create the clipboard's window")
 	end
@@ -97,7 +96,7 @@ function Clipboard:setText(text)
 	self.text = text
 
 	local clipboard = atom(self, "CLIPBOARD")
-	x11.setSelectionOwner(self.display, clipboard, self.window, x11.CurrentTime)
+	x11.setSelectionOwner(self.display, clipboard, self.window, 0)
 	x11.flush(self.display)
 end
 
@@ -107,7 +106,7 @@ function Clipboard:clear()
 	self.text = nil
 
 	local clipboard = atom(self, "CLIPBOARD")
-	x11.setSelectionOwner(self.display, clipboard, 0, x11.CurrentTime)
+	x11.setSelectionOwner(self.display, clipboard, 0, 0)
 	x11.flush(self.display)
 end
 
@@ -124,7 +123,7 @@ end
 function Clipboard:request(clipboard, target)
 	local event = x11.Event()
 
-	x11.convertSelection(self.display, clipboard, target, target, self.window, x11.CurrentTime)
+	x11.convertSelection(self.display, clipboard, target, target, self.window, 0)
 	x11.flush(self.display)
 
 	if not self:waitForNotify(event, clipboard, target) then
@@ -144,7 +143,7 @@ end
 --- What the wait reads of everything else -- a key pressed while a paste was asked for -- is
 --- kept for the loop to hand over once this is done, so a program that pastes is not a program
 --- that loses the events around it.
----@param event x11.ffi.Event # where the answer is left for the caller to read
+---@param event XEvent # where the answer is left for the caller to read
 ---@param clipboard number
 ---@param target number
 ---@return boolean
@@ -188,10 +187,10 @@ end
 
 --- Keeps an event back for the loop, which is where events belong: one read here would
 --- otherwise be one the program never hears about.
----@param event x11.ffi.Event
+---@param event XEvent
 function Clipboard:keep(event)
 	local kept = x11.Event()
-	ffi.copy(kept, event, ffi.sizeof(event))
+	ffi.copy(kept, event, assert(ffi.sizeof(event)))
 
 	local stash = self.eventLoop.stashedEvents
 	stash[#stash + 1] = kept
@@ -199,7 +198,7 @@ end
 
 --- Answers a program asking for what this clipboard is offering, which is the other half of
 --- owning it: the data is written where it asked, and it is told to look there.
----@param event x11.ffi.Event
+---@param event XEvent
 function Clipboard:handleRequest(event)
 	local display = self.display
 	local request = event.xselectionrequest
@@ -242,13 +241,13 @@ function Clipboard:handleRequest(event)
 		reply.xselection.property = property
 	end
 
-	x11.sendEvent(display, request.requestor, x11.False, 0, reply)
+	x11.sendEvent(display, request.requestor, 0, 0, reply)
 	x11.flush(display)
 end
 
 --- Someone else took the clipboard: what was offered is no longer what a paste gets, and
 --- saying so is the difference between an honest answer and a stale one.
----@param event x11.ffi.Event
+---@param event XEvent
 function Clipboard:handleClear(event)
 	if event.xselection.selection ~= atom(self, "CLIPBOARD") then
 		return
@@ -288,7 +287,7 @@ function Clipboard:getText()
 	if storedAs == utf8 then
 		return data
 	elseif storedAs == x11.XA.STRING then
-		return latin1ToUtf8(data)
+		return latin1ToUtf8(assert(data))
 	end
 
 	return nil

@@ -1,16 +1,38 @@
 {
 	"name": "winit",
 	"description": "Cross platform windowing library for LuaJIT",
-	"authors": ["David Cruz <david@bycruz.dev>"],
+	"authors": [
+		"David Cruz <david@bycruz.dev>"
+	],
 	"version": "0.1.7",
 	"dependencies": {
-		"winit-x11": { "path": "../winit-x11", "optional": true },
-		"winit-win32": { "path": "../winit-win32", "optional": true },
-		"winit-macos": { "path": "../winit-macos", "optional": true }
+		"winit-x11": {
+			"path": "../winit-x11",
+			"optional": true
+		},
+		"winit-win32": {
+			"path": "../winit-win32",
+			"optional": true
+		},
+		"winit-macos": {
+			"path": "../winit-macos",
+			"optional": true
+		}
 	},
 	"features": {
-		"linux": ["winit-x11"],
-		"windows": ["winit-win32"],
-		"macos": ["winit-macos"]
+		"linux": [
+			"winit-x11"
+		],
+		"windows": [
+			"winit-win32"
+		],
+		"macos": [
+			"winit-macos"
+		]
+	},
+	"devDependencies": {
+		"lde-test": {
+			"git": "https://github.com/lde-org/lde"
+		}
 	}
 }

@@ -5,14 +5,20 @@ local wait = require("winit-x11.wait")
 local Clipboard = require("winit-x11.clipboard")
 local Dnd = require("winit-x11.dnd")
 
----@class winit-x11.Window: winit.Window
----@field display x11.ffi.Display
+---@class winit-x11.Window
+---@field id number
+---@field width number
+---@field height number
+---@field shouldRedraw boolean
+---@field frameAsked boolean?
+---@field display XDisplay
 ---@field currentCursor number?
 ---@field blankCursor number?
 ---@field cursorGrab winit.CursorGrab?
 ---@field syncCounter number?
 ---@field syncPendingLo number?
 ---@field syncPendingHi number?
+---@field iconSet boolean?
 local X11Window = {}
 X11Window.__index = X11Window
 
@@ -43,6 +49,10 @@ function X11Window.new(eventLoop, width, height)
 		syncPendingLo = nil,
 		syncPendingHi = nil
 	}, X11Window)
+
+	-- What the pointer can be drawn as here: `setShape` asks before asking the backend. The hand
+	-- is always available; these are the rest of this backend's cursor shapes.
+	window.cursors = { text = true, sizewe = true, sizens = true }
 
 	-- Prevent X11 from auto-painting the background (avoids black flicker on resize)
 	x11.setWindowBackgroundPixmap(display, window.id, 0) -- 0 = None
@@ -94,6 +104,7 @@ function X11Window.new(eventLoop, width, height)
 	return window
 end
 
+---@type table<number, string>
 local keysymNames = {
 	[0x20]   = "space",
 	[0xff08] = "backspace",
@@ -135,7 +146,6 @@ local keysymNames = {
 
 ---@param keysym number
 ---@param char string
----@return winit.KeyName?
 local function keysymToKey(keysym, char)
 	local named = keysymNames[keysym]
 	if named then return named end
@@ -164,10 +174,13 @@ end
 
 local cursors = {
 	pointer = x11.Icon.LeftPtr,
-	hand2 = x11.Icon.Hand2
+	hand2 = x11.Icon.Hand2,
+	text = x11.Icon.Xterm,
+	sizewe = x11.Icon.SbHDoubleArrow,
+	sizens = x11.Icon.SbVDoubleArrow,
 }
 
----@return number
+---@return number?
 function X11Window:getOrCreateBlankCursor()
 	if not self.blankCursor then
 		local pixmap = x11.createPixmap(self.display, self.id, 1, 1, 1)
@@ -195,11 +208,11 @@ function X11Window:setCursorGrab(mode)
 	)
 
 	if mode == "contain" then
-		x11.grabPointer(self.display, self.id, x11.True, eventMask,
+		x11.grabPointer(self.display, self.id, 1, eventMask,
 			x11.GrabMode.Async, x11.GrabMode.Async, self.id, 0, 0)
 	elseif mode == "locked" then
-		local blank = self:getOrCreateBlankCursor()
-		x11.grabPointer(self.display, self.id, x11.True, eventMask,
+		local blank = assert(self:getOrCreateBlankCursor())
+		x11.grabPointer(self.display, self.id, 1, eventMask,
 			x11.GrabMode.Async, x11.GrabMode.Async, self.id, blank, 0)
 		x11.warpPointer(self.display, 0, self.id, 0, 0, 0, 0,
 			math.floor(self.width / 2), math.floor(self.height / 2))
@@ -217,10 +230,10 @@ function X11Window:setCursorGrab(mode)
 	self.cursorGrab = mode
 end
 
----@param shape "pointer" | "hand2"
+---@param shape "pointer" | "hand2" | "text" | "sizewe" | "sizens"
 function X11Window:setCursor(shape)
 	if self.currentCursor then
-		x11.freeCursor(self.display, self.currentCursor)
+		x11.freeCursor(self.display, assert(self.currentCursor))
 	end
 
 	local cursor = x11.createFontCursor(self.display, cursors[shape])
@@ -230,7 +243,7 @@ end
 
 function X11Window:resetCursor()
 	if self.currentCursor then
-		x11.freeCursor(self.display, self.currentCursor)
+		x11.freeCursor(self.display, assert(self.currentCursor))
 		self.currentCursor = nil
 	end
 
@@ -239,13 +252,39 @@ end
 
 ---@param title string
 function X11Window:setTitle(title)
-	x11.changeProperty(self.display, self.id, "_NET_WM_NAME", "UTF8_STRING", 8, 0, title, #title)
+	x11.changeProperty(self.display, self.id, "_NET_WM_NAME", "UTF8_STRING", 8, 0,
+		ffi.cast("const unsigned char*", title), #title)
 	x11.flush(self.display)
 end
 
+--- The window manager's picture for this window. X11 takes it as ARGB words in one CARDINAL
+--- property, `_NET_WM_ICON`; a page of sizes can be written, but one good square is what every
+--- window manager scales for its title bar and switcher.
+---@param width number
+---@param height number
+---@param rgba string # width * height pixels, four bytes each, in red, green, blue, alpha order
+function X11Window:setIcon(width, height, rgba)
+	assert(width > 0 and height > 0, "an icon needs a size")
+	assert(#rgba == width * height * 4, "an icon needs four bytes for every pixel")
+
+	local data = ffi.new("unsigned long[?]", width * height + 2)
+	data[0], data[1] = width, height
+	for at = 0, width * height - 1 do
+		local i = at * 4 + 1
+		local r, g, b, a = rgba:byte(i, i + 3)
+		data[at + 2] = a * 0x1000000 + r * 0x10000 + g * 0x100 + b
+	end
+
+	x11.changeProperty(self.display, self.id, "_NET_WM_ICON", "CARDINAL", 32, 0,
+		ffi.cast("const unsigned char*", data), width * height + 2)
+	x11.flush(self.display)
+	self.iconSet = true
+end
+
+
 function X11Window:destroy()
 	if self.currentCursor then
-		x11.freeCursor(self.display, self.currentCursor)
+		x11.freeCursor(self.display, assert(self.currentCursor))
 	end
 	if self.blankCursor then
 		x11.freeCursor(self.display, self.blankCursor)
@@ -259,8 +298,8 @@ function X11Window:destroy()
 		local doneVal = x11.SyncValue()
 		doneVal.hi = -1
 		doneVal.lo = 0
-		x11.syncSetCounter(self.display, self.syncCounter, doneVal)
-		x11.syncDestroyCounter(self.display, self.syncCounter)
+		x11.syncSetCounter(self.display, assert(self.syncCounter), doneVal)
+		x11.syncDestroyCounter(self.display, assert(self.syncCounter))
 	end
 
 	x11.destroyWindow(self.display, self.id)
@@ -269,20 +308,20 @@ end
 ---@private
 function X11Window:acknowledgeSync()
 	if self.syncPendingLo ~= nil and self.syncCounter then
-		local value = x11.syncIntsToValue(self.syncPendingLo, self.syncPendingHi)
-		x11.syncSetCounter(self.display, self.syncCounter, value)
+		local value = x11.syncIntsToValue(assert(self.syncPendingLo), assert(self.syncPendingHi))
+		x11.syncSetCounter(self.display, assert(self.syncCounter), value)
 		self.syncPendingLo, self.syncPendingHi = nil, nil
 	end
 
 	self.frameAsked = nil
 end
 
----@class winit-x11.EventLoop: winit.EventLoop
+---@class winit-x11.EventLoop
 ---@field windows table<string, winit-x11.Window>
----@field display x11.ffi.Display
+---@field display XDisplay
 ---@field clipboard winit-x11.Clipboard? # The one clipboard made on this loop, whose requests it answers
 ---@field dnd winit-x11.Dnd # The drag protocol a drop on a window of this loop is read with
----@field stashedEvents x11.ffi.Event[] # Events kept back while something was waiting on another program
+---@field stashedEvents XEvent[] # Events kept back while something was waiting on another program
 local X11EventLoop = {}
 X11EventLoop.__index = X11EventLoop
 
@@ -331,7 +370,7 @@ function X11EventLoop:run(callback)
 	local currentMode = "poll"
 	local timeout = nil ---@type number?
 
-	---@type table<number, true>
+	---@type table<number, winit.KeyName>
 	local held = {}
 
 	---@type winit.EventManager
@@ -349,8 +388,10 @@ function X11EventLoop:run(callback)
 		--- end to it. One wait: a deadline is what a screen with something to do on its own asks
 		--- for, and it asks again for the next one. See `winit.EventManager:setTimeout`.
 		---@param seconds number?
+		---@return nil
 		function handler:setTimeout(seconds)
 			timeout = seconds
+			return nil
 		end
 
 		function handler:requestRedraw(window)
@@ -364,14 +405,16 @@ function X11EventLoop:run(callback)
 
 	local function readRawMotion(cookie)
 		local raw = xi2.castRawEvent(cookie)
+		local mask = ffi.cast("unsigned char*", raw.valuators.mask)
+		local values = ffi.cast("double*", raw.valuators.values)
 		local dx, dy = 0.0, 0.0
 		local vi = 0
 		for axis = 0, raw.valuators.mask_len * 8 - 1 do
 			local byte   = math.floor(axis / 8)
 			local bitpos = axis % 8
-			if bit.band(raw.valuators.mask[byte], bit.lshift(1, bitpos)) ~= 0 then
-				if axis == 0 then dx = raw.valuators.values[vi] end
-				if axis == 1 then dy = raw.valuators.values[vi] end
+			if bit.band(mask[byte], bit.lshift(1, bitpos)) ~= 0 then
+				if axis == 0 then dx = values[vi] end
+				if axis == 1 then dy = values[vi] end
 				vi = vi + 1
 			end
 		end
@@ -418,7 +461,9 @@ function X11EventLoop:run(callback)
 			callback({ window = window, name = "mouseMove", x = event.xmotion.x, y = event.xmotion.y }, handler)
 		end,
 
+		---@param window winit-x11.Window?
 		[x11.EventType.ClientMessage] = function(window)
+			---@cast window winit-x11.Window
 			-- A drag is a conversation of its own, and it is the source that starts it: what it
 			-- sends is not an event a program hears about until it ends in a drop.
 			if self.dnd:handleClientMessage(window, event, callback, handler) then
@@ -466,7 +511,9 @@ function X11EventLoop:run(callback)
 
 		[x11.EventType.DestroyNotify] = function(window) end,
 
+		---@param window winit-x11.Window?
 		[x11.EventType.ConfigureNotify] = function(window)
+			---@cast window winit-x11.Window
 			local newWidth = event.xconfigure.width
 			local newHeight = event.xconfigure.height
 
@@ -534,7 +581,7 @@ function X11EventLoop:run(callback)
 
 		[x11.EventType.KeyPress] = function(window)
 			local char = x11.lookupString(event)
-			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
+			local baseKeysym = assert(tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0)))
 			local key = keysymToKey(baseKeysym, char)
 			if key then
 				local repeated = held[event.xkey.keycode] ~= nil
@@ -555,8 +602,8 @@ function X11EventLoop:run(callback)
 		end,
 
 		[x11.EventType.KeyRelease] = function(window)
-			local baseKeysym = tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0))
-			local baseChar = (baseKeysym >= 0x20 and baseKeysym <= 0x7e) and string.char(baseKeysym) or ""
+			local baseKeysym = assert(tonumber(x11.keycodeToKeysym(display, event.xkey.keycode, 0)))
+			local baseChar = (baseKeysym >= 0x20 and baseKeysym <= 0x7e) and string.char(assert(baseKeysym)) or ""
 			local key = held[event.xkey.keycode] or keysymToKey(baseKeysym, baseChar)
 
 			local repeated = false
@@ -622,7 +669,7 @@ function X11EventLoop:run(callback)
 	local function nextEvent(block, coalesce)
 		local kept = self.stashedEvents
 		if #kept > 0 then
-			ffi.copy(event, table.remove(kept, 1), ffi.sizeof(event))
+			ffi.copy(event, assert(table.remove(kept, 1)), assert(ffi.sizeof(event)))
 			return true
 		end
 

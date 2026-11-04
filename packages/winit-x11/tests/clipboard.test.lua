@@ -14,7 +14,6 @@ local wait = require("winit-x11.wait")
 
 --- Whether the clipboard tool the tests use as a second program is on this machine. It is
 --- what makes the half of the protocol that needs somebody else's program testable at all.
----@return boolean
 local function hasXsel()
 	local pipe = io.popen("command -v xsel 2>/dev/null")
 	if not pipe then
@@ -77,15 +76,16 @@ test.it("should answer a program that asks it for the text", function()
 
 	-- The ownership has to be the server's before the other program asks, and a sync is what
 	-- waits for it to be.
-	x11.sync(eventLoop.display, x11.False)
+	x11.sync(eventLoop.display --[[@as ffi.ptr<ffi.cdata*>]], 0)
 
-	x11.convertSelection(display, selection, target, property, requestor, x11.CurrentTime)
+	x11.convertSelection(display, selection, target, property, requestor, 0)
 	x11.flush(display)
 
 	local read = nil
 	local frames = 0
 
 	eventLoop:run(function(_, handler)
+		---@cast handler winit.EventManager
 		handler:setMode("poll")
 
 		-- The other program is this process on another connection, so its answer is read
@@ -114,7 +114,7 @@ test.it("should answer a program that asks it for the text", function()
 end)
 
 test.it("should say nothing when no program is offering anything", function()
-	local eventLoop, clipboard = setup()
+	local _, clipboard = setup()
 
 	local display = x11.openDisplay(nil)
 	test.notEqual(display, nil) ---@cast display -nil
@@ -123,8 +123,8 @@ test.it("should say nothing when no program is offering anything", function()
 	-- looks like: an owner of None is an empty clipboard, and asking for it is answered with
 	-- nothing rather than with silence.
 	local selection = x11.internAtom(display, "CLIPBOARD", 0)
-	x11.setSelectionOwner(display, selection, 0, x11.CurrentTime)
-	x11.sync(display, x11.False)
+	x11.setSelectionOwner(display, selection, 0, 0)
+	x11.sync(display, 0)
 
 	local started = wait.monotonic()
 	test.equal(clipboard:getText(), nil)
@@ -147,8 +147,8 @@ test.it("should give up on an owner that never answers", function()
 	local owner = x11.createSimpleWindow(display, root, 0, 0, 10, 10, 0, 0, 0)
 
 	local selection = x11.internAtom(display, "CLIPBOARD", 0)
-	x11.setSelectionOwner(display, selection, owner, x11.CurrentTime)
-	x11.sync(display, x11.False)
+	x11.setSelectionOwner(display, selection, owner, 0)
+	x11.sync(display, 0)
 
 	local started = wait.monotonic()
 	test.equal(clipboard:getText(), nil)
@@ -190,6 +190,7 @@ external("should serve the text to a program that asks for it", function()
 
 	local frames = 0
 	eventLoop:run(function(_, handler)
+		---@cast handler winit.EventManager
 		handler:setMode("wait")
 		handler:setTimeout(0.02)
 
@@ -223,13 +224,13 @@ test.it("should keep the events around a paste rather than swallowing them", fun
 	local root = x11.defaultRootWindow(display)
 	local owner = x11.createSimpleWindow(display, root, 0, 0, 10, 10, 0, 0, 0)
 	local selection = x11.internAtom(display, "CLIPBOARD", 0)
-	x11.setSelectionOwner(display, selection, owner, x11.CurrentTime)
-	x11.sync(display, x11.False)
+	x11.setSelectionOwner(display, selection, owner, 0)
+	x11.sync(display, 0)
 
 	-- Three keys pressed before the loop runs, all of them queued behind the paste. The window
 	-- has to be on the server, and on screen, before anything is sent to it -- which is what a
 	-- round trip waits for, and what the loop would otherwise do first.
-	x11.sync(eventLoop.display, x11.False)
+	x11.sync(eventLoop.display --[[@as ffi.ptr<ffi.cdata*>]], 0)
 
 	local keycode = 0
 	for code = 8, 255 do
@@ -247,7 +248,7 @@ test.it("should keep the events around a paste rather than swallowing them", fun
 		event.xkey.keycode = keycode
 		event.xkey.state = 0
 
-		x11.sendEvent(display, window.id, x11.False, x11.EventMaskBits.KeyPress, event)
+		x11.sendEvent(display, window.id, 0, x11.EventMaskBits.KeyPress, event)
 	end
 	x11.flush(display)
 

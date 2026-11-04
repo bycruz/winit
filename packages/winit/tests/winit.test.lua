@@ -5,13 +5,13 @@ local winit = require("winit")
 -- window and a clipboard made from it do -- and a machine with nowhere to put a window has
 -- nothing to test it on: the monorepo's tests run every package on every platform, so this
 -- says so rather than looking like a file that registered nothing at all.
-local made, eventLoop = pcall(winit.EventLoop.new)
+local made, maybeEventLoop = pcall(winit.EventLoop.new)
 if not made then
 	test.skip("winit tests (skipped: no display)")
 	return
 end
 
----@cast eventLoop winit.EventLoop
+local eventLoop = assert(maybeEventLoop) --[[@as winit.EventLoop]]
 
 test.it("should hand a program the backend of the platform it runs on", function()
 	-- Both backends' packages are here in the monorepo, and a program installs one of them:
@@ -21,7 +21,7 @@ test.it("should hand a program the backend of the platform it runs on", function
 		Windows = "winit-win32",
 		Linux = "winit-x11",
 		OSX = "winit-macos"
-	})[jit.os])
+	})[jit.os]) --[[@as { Window: any, EventLoop: any, Clipboard: any }]]
 
 	test.equal(winit.Window, backend.Window)
 	test.equal(winit.EventLoop, backend.EventLoop)

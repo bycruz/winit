@@ -23,7 +23,7 @@ local timestamp = ffi.new("struct wlx_timespec[1]")
 local Wait = {}
 
 --- Waits until the display has something to be read from it, or the time runs out.
----@param display x11.ffi.Display
+---@param display XDisplay
 ---@param milliseconds number
 ---@return boolean # Whether the display became readable
 function Wait.readable(display, milliseconds)

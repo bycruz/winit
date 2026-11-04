@@ -19,10 +19,16 @@ end
 
 -- NOTE: This dynamically requires the backend specific module to avoid loading unnecessary code
 local ok, backend = pcall(require, backendPackage)
+---@class winit.Backend
+---@field Window winit.Window
+---@field EventLoop winit.EventLoop
+---@field Clipboard winit.Clipboard
 if not ok then
 	error("winit was installed without its " .. ffi.os .. " backend (" .. backendPackage
 		.. "): " .. tostring(backend))
 end
+
+local backendApi = backend --[[@as winit.Backend]]
 
 ---@alias winit.CursorGrab "locked" | "contain" | "none"
 
@@ -33,12 +39,14 @@ end
 ---@field shouldRedraw boolean
 ---@field frameAsked boolean? # The window manager asked for a frame, and waits to be told it is ready
 ---@field new fun(eventLoop: winit.EventLoop, width: number, height: number): winit.Window
+---@field fromEventLoop fun(eventLoop: winit.EventLoop): winit.Window
 ---@field destroy fun(self: winit.Window)
 ---@field setTitle fun(self: winit.Window, title: string)
 ---@field setCursor fun(self: winit.Window, shape: string)
 ---@field resetCursor fun(self: winit.Window)
 ---@field setCursorGrab fun(self: winit.Window, mode: winit.CursorGrab)
-local Window = backend.Window
+---@field setIcon (fun(self: winit.Window, width: number, height: number, rgba: string))? # A square picture for the title bar, where the backend has one
+local Window = backendApi.Window
 
 ---@param eventLoop winit.EventLoop
 function Window.fromEventLoop(eventLoop) ---@return winit.Window
@@ -84,20 +92,20 @@ end
 --- Text is what both platforms agree on, and what a program reading what a player pasted
 --- needs; anything else is a format the two do not name the same way.
 ---@class winit.Clipboard
----@field new fun(eventLoop: winit.EventLoop): winit.Clipboard
+---@field new fun(eventLoop: winit.EventLoop?): winit.Clipboard
 ---@field setText fun(self: winit.Clipboard, text: string) # Offer this text to the rest of the system
 ---@field getText fun(self: winit.Clipboard): string? # What the clipboard holds, or nothing when it holds no text
 ---@field clear fun(self: winit.Clipboard) # Empty the clipboard
-local Clipboard = backend.Clipboard
+local Clipboard = backendApi.Clipboard
 
 ---@alias winit.EventLoopMode "poll" | "wait"
 
 ---@class winit.EventManager
----@field exit fun(self)
----@field close fun(self, window: winit.Window)
----@field requestRedraw fun(self, window: winit.Window)
----@field setMode fun(self, mode: winit.EventLoopMode)
----@field setTimeout fun(self, seconds: number?) # How long the next wait may last, or nothing to wait out an event
+---@field exit fun(self: winit.EventManager)
+---@field close fun(self: winit.EventManager, window: winit.Window)
+---@field requestRedraw fun(self: winit.EventManager, window: winit.Window)
+---@field setMode fun(self: winit.EventManager, mode: winit.EventLoopMode)
+---@field setTimeout fun(self: winit.EventManager, seconds: number?) # How long the next wait may last, or nothing to wait out an event
 
 ---@alias winit.EventHandler fun(event: winit.Event, handler: winit.EventManager)
 
@@ -107,7 +115,7 @@ local Clipboard = backend.Clipboard
 ---@field register fun(self: winit.EventLoop, window: winit.Window)
 ---@field close fun(self: winit.EventLoop, window: winit.Window)
 ---@field run fun(self: winit.EventLoop, callback: winit.EventHandler)
-local EventLoop = backend.EventLoop
+local EventLoop = backendApi.EventLoop
 
 return {
 	EventLoop = EventLoop,

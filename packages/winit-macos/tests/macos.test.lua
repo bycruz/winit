@@ -103,7 +103,7 @@ test.it("should offer text to the clipboard and read it back", function()
 end)
 
 test.it("should run the loop, making a window and waiting on what is next", function()
-	local eventLoop, window = setup(320, 240)
+	local eventLoop = setup(320, 240)
 
 	local seen = {}
 	local waited = 0
@@ -129,7 +129,7 @@ test.it("should run the loop, making a window and waiting on what is next", func
 end)
 
 test.it("should wake a waiting loop at the deadline it was given", function()
-	local eventLoop, window = setup(320, 240)
+	local eventLoop = setup(320, 240)
 
 	local started = os.clock()
 	local wakes = 0

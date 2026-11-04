@@ -1,3 +1,4 @@
+local ffi = require("ffi")
 local x11 = require("x11api")
 
 --- The version of the drag protocol this target speaks. Five is the one where the program doing
@@ -13,7 +14,6 @@ local URI_LIST = "text/uri-list"
 --- Two 16-bit halves of a 32-bit value, which is how the protocol packs a point into one.
 ---@param high number
 ---@param low number
----@return number
 local function pack16(high, low)
 	return bit.bor(bit.lshift(bit.band(high, 0xFFFF), 16), bit.band(low, 0xFFFF))
 end
@@ -21,7 +21,6 @@ end
 --- ... and back, with the sign the protocol means by them: a point can sit to the left of or
 --- above the root window's corner, which is where a second screen is.
 ---@param packed number
----@return number high, number low
 local function unpack16(packed)
 	local high = bit.band(bit.rshift(packed, 16), 0xFFFF)
 	local low = bit.band(packed, 0xFFFF)
@@ -33,7 +32,7 @@ local function unpack16(packed)
 end
 
 ---@class winit-x11.Dnd
----@field display x11.ffi.Display
+---@field display XDisplay
 ---@field atoms table<string, number>
 ---@field source number? # The window of the program dragging, while one is over a window of ours
 ---@field version number # The version that program speaks
@@ -51,14 +50,17 @@ Dnd.__index = Dnd
 ---@param text string
 ---@return string[]
 function Dnd.parseUriList(text)
+	---@type string[]
 	local paths = {}
 
 	for line in text:gmatch("[^\r\n]+") do
+		line = tostring(line)
 		-- safety: the list is a text file, and a text file may explain itself
 		if line:sub(1, 1) ~= "#" then
 			local path = Dnd.uriToPath(line)
 			if path then
-				paths[#paths + 1] = path
+				local kept = path --[[@as string]]
+				paths[#paths + 1] = kept
 			end
 		end
 	end
@@ -82,7 +84,7 @@ function Dnd.uriToPath(uri)
 	end
 
 	return (path:gsub("%%(%x%x)", function(hex)
-		return string.char(tonumber(hex, 16))
+		return string.char(assert(tonumber(hex, 16)))
 	end))
 end
 
@@ -90,6 +92,7 @@ end
 ---@return winit-x11.Dnd
 function Dnd.new(eventLoop)
 	local display = eventLoop.display
+	local displayPtr = ffi.cast("void*", display)
 
 	local names = {
 		"XdndAware", "XdndEnter", "XdndPosition", "XdndStatus", "XdndLeave", "XdndDrop",
@@ -97,7 +100,7 @@ function Dnd.new(eventLoop)
 	}
 
 	local atoms = {}
-	local interned = x11.internAtoms(display, names)
+	local interned = x11.internAtoms(displayPtr --[[@as XDisplay]], names)
 	for i, name in ipairs(names) do
 		atoms[name] = interned[i]
 	end
@@ -136,7 +139,7 @@ end
 
 --- A drag has come over a window of ours, and says what it is carrying.
 ---@param window winit-x11.Window
----@param client x11.ffi.ClientMessageEvent
+---@param client XClientMessageEvent
 function Dnd:enter(window, client)
 	local version = bit.rshift(client.data.l[1], 24)
 	local more = bit.band(client.data.l[1], 1) ~= 0
@@ -167,14 +170,17 @@ end
 
 --- The drag has moved, and where it is standing is where a drop would land.
 ---@param window winit-x11.Window
----@param client x11.ffi.ClientMessageEvent
+---@param client XClientMessageEvent
 function Dnd:position(window, client)
 	if client.data.l[0] ~= self.source then
 		return
 	end
 
 	self.window = window
-	self.x, self.y = unpack16(client.data.l[2])
+	local x, y = unpack16(client.data.l[2])
+	local px = assert(tonumber(x))
+	local py = assert(tonumber(y))
+	self.x, self.y = px, py
 
 	self:status()
 end
@@ -199,14 +205,14 @@ function Dnd:status()
 	reply.xclient.data.l[3] = pack16(window.width, window.height)
 	reply.xclient.data.l[4] = self.accepted and self.atoms.XdndActionCopy or 0
 
-	x11.sendEvent(self.display, self.source, x11.False, 0, reply)
+	x11.sendEvent(self.display, assert(self.source), 0, 0, reply)
 	x11.flush(self.display)
 end
 
 --- The drag was dropped, and what it carries is asked for by name -- the same door a clipboard
 --- read goes through, answered later, by the source, as an event of its own.
 ---@param window winit-x11.Window
----@param client x11.ffi.ClientMessageEvent
+---@param client XClientMessageEvent
 function Dnd:drop(window, client)
 	if client.data.l[0] ~= self.source then
 		return
@@ -246,12 +252,12 @@ function Dnd:finished(window, success)
 	reply.xclient.data.l[1] = success and 1 or 0
 	reply.xclient.data.l[2] = success and self.atoms.XdndActionCopy or 0
 
-	x11.sendEvent(self.display, self.source, x11.False, 0, reply)
+	x11.sendEvent(self.display, assert(self.source), 0, 0, reply)
 	x11.flush(self.display)
 end
 
 ---@param window winit-x11.Window?
----@param event x11.ffi.Event
+---@param event XEvent
 ---@param callback winit.EventHandler
 ---@param handler winit.EventManager
 ---@return boolean # Whether this was one of the drag protocol's messages
@@ -277,7 +283,7 @@ end
 
 --- What the source wrote when it was asked for the files it dropped: the paths to hand an app,
 --- and the word the source is owed that they arrived.
----@param event x11.ffi.Event
+---@param event XEvent
 ---@param callback winit.EventHandler
 ---@param handler winit.EventManager
 function Dnd:handleSelectionNotify(event, callback, handler)

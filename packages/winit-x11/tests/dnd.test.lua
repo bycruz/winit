@@ -37,13 +37,12 @@ end)
 --- Two halves of a point packed into the 32 bits the protocol packs them in.
 ---@param high number
 ---@param low number
----@return number
 local function pack16(high, low)
 	return bit.bor(bit.lshift(bit.band(high, 0xFFFF), 16), bit.band(low, 0xFFFF))
 end
 
 --- What a program doing the dragging sends the window it is over.
----@param display x11.ffi.Display
+---@param display XDisplay
 ---@param window number
 ---@param messageType number
 ---@param values number[]
@@ -58,19 +57,19 @@ local function sendClientMessage(display, window, messageType, values)
 		event.xclient.data.l[i - 1] = value
 	end
 
-	x11.sendEvent(display, window, x11.False, 0, event)
+	x11.sendEvent(display, window, 0, 0, event)
 	x11.flush(display)
 end
 
 --- The names every drag on a display is spoken in, interned once for a test.
----@param display x11.ffi.Display
----@return table<string, number>
+---@param display XDisplay
 local function internDndAtoms(display)
 	local names = {
 		"XdndEnter", "XdndPosition", "XdndDrop", "XdndStatus", "XdndFinished", "XdndSelection",
 		"XdndActionCopy", "text/uri-list", "UTF8_STRING",
 	}
 
+	---@type table<string, number>
 	local atoms = {}
 	local interned = x11.internAtoms(display, names)
 	for i, name in ipairs(names) do
@@ -83,10 +82,10 @@ end
 --- What the socket of a second connection is holding, which is what a program doing the
 --- dragging would be reading as the window under it answers it. `answer` is handed every
 --- request for the files, and what the source hears is left in `state`.
----@param display x11.ffi.Display
+---@param display XDisplay
 ---@param atoms table<string, number>
 ---@param state table
----@param answer fun(request: x11.ffi.SelectionRequestEvent)? # What to put where the target asked
+---@param answer fun(request: XSelectionRequestEvent)? # What to put where the target asked
 ---@return number
 local function readSource(display, atoms, state, answer)
 	local read = 0
@@ -95,16 +94,17 @@ local function readSource(display, atoms, state, answer)
 		local seen = x11.Event()
 		x11.nextEvent(display, seen)
 		read = read + 1
+		local client = seen.xclient --[[@as { message_type: number, data: { l: number[] } }]]
 
 		if seen.type == x11.EventType.SelectionRequest and answer then
 			answer(seen.xselectionrequest)
-		elseif seen.type == x11.EventType.ClientMessage and seen.xclient.message_type == atoms.XdndStatus then
-			state.statusWindow = seen.xclient.data.l[0]
-			state.statusAccepted = bit.band(seen.xclient.data.l[1], 1) == 1
-			state.statusRectangle = { seen.xclient.data.l[2], seen.xclient.data.l[3] }
-		elseif seen.type == x11.EventType.ClientMessage and seen.xclient.message_type == atoms.XdndFinished then
-			state.finishedWindow = seen.xclient.data.l[0]
-			state.finishedSuccess = bit.band(seen.xclient.data.l[1], 1) == 1
+		elseif seen.type == x11.EventType.ClientMessage and client.message_type == atoms.XdndStatus then
+			state.statusWindow = client.data.l[0]
+			state.statusAccepted = bit.band(client.data.l[1], 1) == 1
+			state.statusRectangle = { client.data.l[2], client.data.l[3] }
+		elseif seen.type == x11.EventType.ClientMessage and client.message_type == atoms.XdndFinished then
+			state.finishedWindow = client.data.l[0]
+			state.finishedSuccess = bit.band(client.data.l[1], 1) == 1
 		end
 	end
 
@@ -130,12 +130,14 @@ test.it("should take the files a drag drops on a window", function()
 
 	-- The source owns the selection the files travel in, and tells the window under it that
 	-- the drag is there, where it is standing, and that it has been let go of.
-	x11.setSelectionOwner(display, atoms.XdndSelection, source, x11.CurrentTime)
-	x11.sync(display, x11.False)
+	x11.setSelectionOwner(display, atoms.XdndSelection, source, 0)
+	x11.sync(display, 0)
 
 	-- Where the window sits on the screen, so the position sent below is a point of it a
 	-- drag would be standing over -- a window manager is free to have moved it.
-	local windowX, windowY = x11.translateCoordinates(display, window.id, root, 0, 0)
+	local rawWindowX, rawWindowY = x11.translateCoordinates(display, window.id, root, 0, 0)
+	local windowX = assert(tonumber(rawWindowX))
+	local windowY = assert(tonumber(rawWindowY))
 	local atX, atY = 60, 40
 
 	sendClientMessage(display, window.id, atoms.XdndEnter, {
@@ -147,12 +149,13 @@ test.it("should take the files a drag drops on a window", function()
 	sendClientMessage(display, window.id, atoms.XdndDrop, { source, 0, 0 })
 
 	local state = {}
+	---@type winit.Event?
 	local dropped = nil
 	local frames = 0
 
 	--- Puts the files where the target asked for them, which is what the program doing the
 	--- dragging does with the selection it owns, and tells it to look there.
-	---@param request x11.ffi.SelectionRequestEvent
+	---@param request XSelectionRequestEvent
 	local function answer(request)
 		x11.setProperty(display, request.requestor, request.property, atoms.UTF8_STRING, 8,
 			x11.PropMode.Replace, uriList, #uriList)
@@ -165,7 +168,7 @@ test.it("should take the files a drag drops on a window", function()
 		reply.xselection.property = request.property
 		reply.xselection.time = request.time
 
-		x11.sendEvent(display, request.requestor, x11.False, 0, reply)
+		x11.sendEvent(display, request.requestor, 0, 0, reply)
 		x11.flush(display)
 	end
 
@@ -186,11 +189,12 @@ test.it("should take the files a drag drops on a window", function()
 
 	-- The word the source is owed travels after the drop does, and a sync is what waits for
 	-- the server to have taken it.
-	x11.sync(eventLoop.display, x11.False)
+	x11.sync(eventLoop.display, 0)
 	readSource(display, atoms, state, answer)
 
 	test.notEqual(dropped, nil, "the drop never reached the program")
 	---@cast dropped -nil
+	---@cast dropped { window: winit.Window, name: "fileDrop", paths: string[], x: number, y: number }
 	test.equal(dropped.window, window)
 	test.deepEqual(dropped.paths, { "/home/once/dropped file.txt", "/home/once/second.txt" })
 
@@ -220,8 +224,8 @@ test.it("should say where a drop is welcome and what became of one it did not ta
 	local source = x11.createSimpleWindow(display, root, 0, 0, 10, 10, 0, 0, 0)
 	local atoms = internDndAtoms(display)
 
-	x11.setSelectionOwner(display, atoms.XdndSelection, source, x11.CurrentTime)
-	x11.sync(display, x11.False)
+	x11.setSelectionOwner(display, atoms.XdndSelection, source, 0)
+	x11.sync(display, 0)
 
 	-- The window is asked where a drop would land before anything is dropped, and what it
 	-- answers decides whether the drag is welcome: a window that never answers is one a drag
@@ -240,7 +244,7 @@ test.it("should say where a drop is welcome and what became of one it did not ta
 
 	--- Says nothing at all about the files, which is what an owner with nothing to hand over
 	--- answers with -- the same shape of answer as one that cannot read what it was asked.
-	---@param request x11.ffi.SelectionRequestEvent
+	---@param request XSelectionRequestEvent
 	local function refuse(request)
 		local reply = x11.Event()
 		reply.xselection.type = x11.EventType.SelectionNotify
@@ -250,7 +254,7 @@ test.it("should say where a drop is welcome and what became of one it did not ta
 		reply.xselection.property = 0
 		reply.xselection.time = request.time
 
-		x11.sendEvent(display, request.requestor, x11.False, 0, reply)
+		x11.sendEvent(display, request.requestor, 0, 0, reply)
 		x11.flush(display)
 	end
 
@@ -276,7 +280,7 @@ test.it("should say where a drop is welcome and what became of one it did not ta
 		end
 	end)
 
-	x11.sync(eventLoop.display, x11.False)
+	x11.sync(eventLoop.display, 0)
 	readSource(display, atoms, state, refuse)
 
 	test.equal(state.statusAccepted, true, "a window should welcome files")

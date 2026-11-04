@@ -7,7 +7,7 @@ local user32 = require("winapi.user32")
 ---@return string[] paths
 ---@return number x
 ---@return number y
-return function(drop)
+local function readDrop(drop)
 	local count = shell32.dragQueryFileCount(drop)
 	local paths = {}
 
@@ -29,3 +29,5 @@ return function(drop)
 
 	return paths, 0, 0
 end
+
+return readDrop

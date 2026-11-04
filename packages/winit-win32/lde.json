@@ -1,9 +1,18 @@
 {
 	"name": "winit-win32",
 	"description": "The Win32 backend of winit",
-	"authors": ["David Cruz <david@bycruz.dev>"],
+	"authors": [
+		"David Cruz <david@bycruz.dev>"
+	],
 	"version": "0.1.0",
 	"dependencies": {
-		"winapi": { "version": "0.1" }
+		"winapi": {
+			"version": "0.1"
+		}
+	},
+	"devDependencies": {
+		"lde-test": {
+			"git": "https://github.com/lde-org/lde"
+		}
 	}
 }

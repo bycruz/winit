@@ -81,7 +81,8 @@ enum {
 // the Lua side hands over, so what is here is the last leg of that translation.
 enum {
 	WM_CURSOR_ARROW = 0,
-	WM_CURSOR_HAND = 1
+	WM_CURSOR_HAND = 1,
+	WM_CURSOR_TEXT = 2
 };
 
 enum {
@@ -602,6 +603,8 @@ void winit_macos_window_set_cursor(int handle, int shape) {
 
 	if (shape == WM_CURSOR_HAND) {
 		[[NSCursor pointingHandCursor] set];
+	} else if (shape == WM_CURSOR_TEXT) {
+		[[NSCursor IBeamCursor] set];
 	} else {
 		[[NSCursor arrowCursor] set];
 	}

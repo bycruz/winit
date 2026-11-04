@@ -13,7 +13,7 @@ local OPEN_RETRY_MS = 10
 local Clipboard = {}
 Clipboard.__index = Clipboard
 
----@param _eventLoop winit.EventLoop # the loop belongs to the X11 side of this; here it is only symmetry
+---@param _eventLoop winit.EventLoop? # the loop belongs to the X11 side of this; here it is only symmetry
 ---@return winit-win32.Clipboard
 function Clipboard.new(_eventLoop)
 	return setmetatable({}, Clipboard)
@@ -36,14 +36,16 @@ end
 --- Offers text to the rest of the system, which keeps it after this program is gone: what is
 --- handed over is a block of the system's own memory, and the clipboard takes it from there.
 ---@param text string
+---@return nil
 function Clipboard:setText(text)
 	local wide = kernel32.utf8ToWide(text)
 	if wide == nil then
-		return
+		return nil
 	end
 
 	local units = 0
-	while wide[units] ~= 0 do
+	local chars = ffi.cast("wchar_t*", wide)
+	while chars[units] ~= 0 do
 		units = units + 1
 	end
 
@@ -51,7 +53,7 @@ function Clipboard:setText(text)
 	local bytes = (units + 1) * 2
 
 	if not open() then
-		return
+		return nil
 	end
 
 	user32.emptyClipboard()
