@@ -13,6 +13,10 @@ local kernel32 = require("winapi.kernel32")
 
 local ole32 = ffi.load("ole32")
 
+-- A C function has one declaration in a process, whoever makes it first: declared under its own
+-- name, the COM entry points below would take the names an audio library or anything else in the
+-- process declares with a GUID type of its own, and every call through those would be refused for
+-- passing the wrong struct. They are bound to the same symbols under names of winit's own instead.
 ffi.cdef([[
 	typedef int32_t HRESULT;
 	typedef uint32_t ULONG;
@@ -32,11 +36,11 @@ ffi.cdef([[
 		const WCHAR *pszSpec;
 	} WINIT_FILTERSPEC;
 
-	HRESULT CoInitializeEx(void *reserved, DWORD coinit);
-	void CoUninitialize(void);
-	HRESULT CoCreateInstance(const WINIT_GUID *clsid, void *outer, DWORD context,
-		const WINIT_GUID *iid, void **out);
-	void CoTaskMemFree(void *memory);
+	HRESULT winit_CoInitializeEx(void *reserved, DWORD coinit) __asm__("CoInitializeEx");
+	void winit_CoUninitialize(void) __asm__("CoUninitialize");
+	HRESULT winit_CoCreateInstance(const WINIT_GUID *clsid, void *outer, DWORD context,
+		const WINIT_GUID *iid, void **out) __asm__("CoCreateInstance");
+	void winit_CoTaskMemFree(void *memory) __asm__("CoTaskMemFree");
 ]])
 
 -- CLSID_FileOpenDialog and IID_IFileOpenDialog, as the Windows SDK spells them.
@@ -109,7 +113,7 @@ local function itemPath(item)
 	if getDisplay(item, SIGDN_FILESYSPATH, ffi.cast("void **", displayOut)) == 0
 	and displayOut[0] ~= nil then
 		path = kernel32.wideToUtf8(ffi.cast("const WCHAR *", displayOut[0]))
-		ole32.CoTaskMemFree(displayOut[0])
+		ole32.winit_CoTaskMemFree(displayOut[0])
 	end
 
 	releaseItem(item)
@@ -125,7 +129,7 @@ local FileDialog = {}
 function FileDialog.open(window, opts)
 	opts = opts or {}
 
-	local initialized = ole32.CoInitializeEx(nil, COINIT_APARTMENTTHREADED)
+	local initialized = ole32.winit_CoInitializeEx(nil, COINIT_APARTMENTTHREADED)
 	local ownsCom = initialized == 0 or initialized == 1
 
 	if not ownsCom then
@@ -133,12 +137,12 @@ function FileDialog.open(window, opts)
 	end
 
 	local out = ffi.new("void *[1]")
-	local created = ole32.CoCreateInstance(guid(FILE_OPEN_DIALOG), nil, CLSCTX_INPROC_SERVER,
+	local created = ole32.winit_CoCreateInstance(guid(FILE_OPEN_DIALOG), nil, CLSCTX_INPROC_SERVER,
 		guid(IID_FILE_OPEN_DIALOG), ffi.cast("void **", out))
 	local dialog = out[0]
 
 	if created ~= 0 or dialog == nil then
-		if ownsCom then ole32.CoUninitialize() end
+		if ownsCom then ole32.winit_CoUninitialize() end
 		return {}
 	end
 
@@ -241,7 +245,7 @@ function FileDialog.open(window, opts)
 
 	release(dialog)
 
-	if ownsCom then ole32.CoUninitialize() end
+	if ownsCom then ole32.winit_CoUninitialize() end
 
 	return paths
 end
