@@ -48,6 +48,25 @@ test.it("offers the system folder dialog", function()
 	test.truthy(type(FileDialog.open) == "function")
 end)
 
+test.it("leaves the COM entry points to the rest of the process", function()
+	-- What an audio library declares after winit is loaded: its own GUID struct, and
+	-- CoCreateInstance taking it. winit loaded first must not have claimed that name with a
+	-- struct of its own, or the call below is refused before it reaches COM.
+	pcall(ffi.cdef, [[
+		typedef struct { uint32_t Data1; uint16_t Data2; uint16_t Data3; uint8_t Data4[8]; } TEST_GUID;
+		int32_t CoCreateInstance(const TEST_GUID *clsid, void *outer, uint32_t context,
+			const TEST_GUID *iid, void **out);
+	]])
+	local ole32 = ffi.load("ole32")
+	local guid = ffi.new("TEST_GUID")
+	local out = ffi.new("void *[1]")
+
+	local ok, err = pcall(function()
+		return ole32.CoCreateInstance(guid, nil, 1, guid, out)
+	end)
+	test.truthy(ok, tostring(err))
+end)
+
 test.it("creates an event loop", function()
 	withEventLoop(function(eventLoop)
 		test.notEqual(eventLoop, nil)
