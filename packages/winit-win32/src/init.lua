@@ -3,6 +3,7 @@ local user32 = require("winapi.user32")
 local kernel32 = require("winapi.kernel32")
 local shell32 = require("winapi.shell32")
 local Clipboard = require("winit-win32.clipboard")
+local FileDialog = require("winit-win32.dialog")
 local readDrop = require("winit-win32.drop")
 
 --- Casts a ffi pointer to a lua number for use as a hash key.
@@ -350,4 +351,5 @@ function Win32EventLoop:cleanup(hInstance)
 	user32.unregisterClass(self.class.lpszClassName, hInstance)
 end
 
-return { Window = Win32Window, EventLoop = Win32EventLoop, Clipboard = Clipboard }
+return { Window = Win32Window, EventLoop = Win32EventLoop, Clipboard = Clipboard,
+	FileDialog = FileDialog }

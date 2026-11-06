@@ -23,6 +23,7 @@ local ok, backend = pcall(require, backendPackage)
 ---@field Window winit.Window
 ---@field EventLoop winit.EventLoop
 ---@field Clipboard winit.Clipboard
+---@field FileDialog winit.FileDialog?
 if not ok then
 	error("winit was installed without its " .. ffi.os .. " backend (" .. backendPackage
 		.. "): " .. tostring(backend))
@@ -98,6 +99,76 @@ end
 ---@field clear fun(self: winit.Clipboard) # Empty the clipboard
 local Clipboard = backendApi.Clipboard
 
+--- One filter in a file dialog: a name and the extensions it accepts.
+---@class winit.FileFilter
+---@field name string
+---@field extensions string[]
+
+--- What a file dialog is asked for.
+---@class winit.FileDialog.OpenOptions
+---@field title string?
+---@field directory boolean? # Choose folders rather than files
+---@field multiple boolean? # Allow more than one answer
+---@field filters winit.FileFilter[]? # File filters offered by the dialog
+
+--- A system dialog of the platform's own. The call is modal: it returns when the dialog is closed,
+--- with the chosen paths, empty when it was cancelled.
+---@class winit.FileDialog
+---@field open fun(window: winit.Window?, opts: winit.FileDialog.OpenOptions?): string[]
+---@field pickFolder fun(window: winit.Window?, opts: { title: string? }?): string?
+---@field pickFile fun(window: winit.Window?, opts: { title: string?, filters: winit.FileFilter[]? }?): string?
+---@field pickFiles fun(window: winit.Window?, opts: { title: string?, filters: winit.FileFilter[]? }?): string[]
+local FileDialog = nil
+
+if backendApi.FileDialog ~= nil then
+	local backend = backendApi.FileDialog
+
+	FileDialog = {}
+
+	---@param window winit.Window?
+	---@param opts winit.FileDialog.OpenOptions?
+	---@return string[]
+	function FileDialog.open(window, opts)
+		return backend.open(window, opts) or {}
+	end
+
+	---@param window winit.Window?
+	---@param opts { title: string? }?
+	---@return string?
+	function FileDialog.pickFolder(window, opts)
+		local paths = backend.open(window, {
+			title = opts ~= nil and opts.title or nil,
+			directory = true,
+			multiple = false,
+		})
+
+		return paths ~= nil and paths[1] or nil
+	end
+
+	---@param window winit.Window?
+	---@param opts { title: string?, filters: winit.FileFilter[]? }?
+	---@return string?
+	function FileDialog.pickFile(window, opts)
+		local paths = backend.open(window, {
+			title = opts ~= nil and opts.title or nil,
+			filters = opts ~= nil and opts.filters or nil,
+		})
+
+		return paths ~= nil and paths[1] or nil
+	end
+
+	---@param window winit.Window?
+	---@param opts { title: string?, filters: winit.FileFilter[]? }?
+	---@return string[]
+	function FileDialog.pickFiles(window, opts)
+		return backend.open(window, {
+			title = opts ~= nil and opts.title or nil,
+			filters = opts ~= nil and opts.filters or nil,
+			multiple = true,
+		}) or {}
+	end
+end
+
 ---@alias winit.EventLoopMode "poll" | "wait"
 
 ---@class winit.EventManager
@@ -121,4 +192,5 @@ return {
 	EventLoop = EventLoop,
 	Window = Window,
 	Clipboard = Clipboard,
+	FileDialog = FileDialog,
 }

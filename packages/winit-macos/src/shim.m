@@ -680,6 +680,74 @@ int winit_macos_next_event(winit_macos_event *out, double timeout) {
 	return 1;
 }
 
+// The system file and folder picker. Paths are returned NUL-separated in the caller's buffer: a
+// filename cannot contain NUL, so this needs no quoting and works for several files at once. The
+// return value is the number of bytes written, 0 for a cancelled dialog and -1 for a path too long.
+int winit_macos_pick(const char *title, int directory, int multiple, const char **extensions,
+	int extensionCount, char *buffer, int capacity) {
+	@autoreleasepool {
+		NSOpenPanel *panel = [NSOpenPanel openPanel];
+
+		[panel setCanChooseFiles:directory ? NO : YES];
+		[panel setCanChooseDirectories:directory ? YES : NO];
+		[panel setAllowsMultipleSelection:multiple ? YES : NO];
+		[panel setCanCreateDirectories:YES];
+
+		if (title != NULL) {
+			[panel setMessage:[NSString stringWithUTF8String:title]];
+		}
+
+		if (!directory && extensions != NULL && extensionCount > 0) {
+			NSMutableArray<NSString *> *types = [NSMutableArray arrayWithCapacity:extensionCount];
+
+			for (int at = 0; at < extensionCount; at++) {
+				if (extensions[at] == NULL || extensions[at][0] == '\0') {
+					continue;
+				}
+
+				[types addObject:[NSString stringWithUTF8String:extensions[at]]];
+			}
+
+			if (types.count > 0) {
+				[panel setAllowedFileTypes:types];
+			}
+		}
+
+		if ([panel runModal] != NSModalResponseOK) {
+			return 0;
+		}
+
+		NSArray<NSURL *> *urls = multiple ? [panel URLs] : ([panel URL] ? @[ [panel URL] ] : @[]);
+
+		if (buffer == NULL || capacity <= 0) {
+			return -1;
+		}
+
+		int used = 0;
+
+		for (NSURL *url in urls) {
+			NSString *path = [url path];
+
+			if (path == nil) {
+				continue;
+			}
+
+			const char *utf8 = [path UTF8String];
+			size_t length = strlen(utf8);
+
+			if (length + 1 > (size_t)(capacity - used)) {
+				return -1;
+			}
+
+			memcpy(buffer + used, utf8, length);
+			used += (int)length;
+			buffer[used++] = '\0';
+		}
+
+		return used;
+	}
+}
+
 // What the clipboard holds, as text, handed over in a buffer the caller owns: the length is
 // answered whether or not there is room for it, so a caller that has none yet asks once for the
 // size and once for the text. A clipboard holding no text at all answers with nothing.

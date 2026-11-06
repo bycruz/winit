@@ -30,6 +30,8 @@ void winit_macos_window_reset_cursor(int handle);
 void winit_macos_window_set_grab(int handle, int mode);
 int winit_macos_next_event(winit_macos_event *out, double timeout);
 int winit_macos_clipboard_get(char *buffer, int capacity);
+int winit_macos_pick(const char *title, int directory, int multiple, const char **extensions,
+	int extensionCount, char *buffer, int capacity);
 int winit_macos_clipboard_set(const char *text);
 int winit_macos_clipboard_clear(void);
 ]])
@@ -490,4 +492,49 @@ function MacClipboard:clear()
 	shim.winit_macos_clipboard_clear()
 end
 
-return { Window = MacWindow, EventLoop = MacEventLoop, Clipboard = MacClipboard }
+--- The macOS file and folder panel. It is application-modal, which is how NSOpenPanel's
+--- synchronous form runs; the owner window is not needed for that.
+---@class winit-macos.FileDialog
+local FileDialog = {}
+
+---@param _window winit.Window?
+---@param opts winit.FileDialog.OpenOptions?
+---@return string[] paths
+function FileDialog.open(_window, opts)
+	opts = opts or {}
+
+	local title = opts.title or "Choose a file"
+	local extensions = {}
+	local seen = {}
+
+	for _, filter in ipairs(opts.filters or {}) do
+		for _, extension in ipairs(filter.extensions or {}) do
+			extension = tostring(extension):gsub("^%.", "")
+
+			if extension ~= "" and not seen[extension] then
+				seen[extension] = true
+				extensions[#extensions + 1] = extension
+			end
+		end
+	end
+
+	local array = ffi.new("const char *[?]", math.max(1, #extensions))
+	for at, extension in ipairs(extensions) do array[at - 1] = extension end
+
+	local buffer = ffi.new("char[?]", 65536)
+	local length = shim.winit_macos_pick(title, opts.directory and 1 or 0, opts.multiple and 1 or 0,
+		array, #extensions, buffer, 65536)
+
+	if length <= 0 then return {} end
+
+	local paths = {}
+
+	for path in ffi.string(buffer, length):gmatch("([^%z]+)") do
+		paths[#paths + 1] = path
+	end
+
+	return paths
+end
+
+return { Window = MacWindow, EventLoop = MacEventLoop, Clipboard = MacClipboard,
+	FileDialog = FileDialog }

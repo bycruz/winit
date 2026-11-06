@@ -5,9 +5,12 @@ local x11 = require("x11api")
 -- caret that blinks is a frame half a second away, and Xlib's own wait -- XNextEvent -- blocks
 -- until an event arrives, of which an idle window has none. What it waits on is the socket the
 -- display talks on, which `x11.connectionNumber` is.
+-- `process`, and anything else that waits on a pipe, declares `struct pollfd` too. There is one C
+-- namespace for the whole process, so this uses the standard name and layout rather than a private
+-- one: a second declaration of `poll` with a different struct is a call reading the wrong memory.
 ffi.cdef [[
-	struct wlx_pollfd { int fd; short events; short revents; };
-	int poll(struct wlx_pollfd *fds, unsigned long count, int milliseconds);
+	struct pollfd { int fd; short events; short revents; };
+	int poll(struct pollfd *fds, unsigned long count, int milliseconds);
 
 	struct wlx_timespec { long tv_sec; long tv_nsec; };
 	int clock_gettime(int clock_id, struct wlx_timespec *tp);
@@ -16,7 +19,7 @@ ffi.cdef [[
 local POLLIN = 1
 local CLOCK_MONOTONIC = 1
 
-local waitFds = ffi.new("struct wlx_pollfd[1]")
+local waitFds = ffi.new("struct pollfd[1]")
 local timestamp = ffi.new("struct wlx_timespec[1]")
 
 ---@class winit-x11.Wait

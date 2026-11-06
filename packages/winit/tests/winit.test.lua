@@ -21,11 +21,16 @@ test.it("should hand a program the backend of the platform it runs on", function
 		Windows = "winit-win32",
 		Linux = "winit-x11",
 		OSX = "winit-macos"
-	})[jit.os]) --[[@as { Window: any, EventLoop: any, Clipboard: any }]]
+	})[jit.os]) --[[@as { Window: any, EventLoop: any, Clipboard: any, FileDialog: any }]]
 
 	test.equal(winit.Window, backend.Window)
 	test.equal(winit.EventLoop, backend.EventLoop)
 	test.equal(winit.Clipboard, backend.Clipboard)
+	test.truthy(backend.FileDialog ~= nil, "the backend has a platform dialog")
+	test.truthy(type(winit.FileDialog.open) == "function", "and the portable API opens it")
+	test.truthy(type(winit.FileDialog.pickFolder) == "function")
+	test.truthy(type(winit.FileDialog.pickFile) == "function")
+	test.truthy(type(winit.FileDialog.pickFiles) == "function")
 end)
 
 test.it("should make a window from a loop, at the size a program gets by default", function()

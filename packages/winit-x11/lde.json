@@ -4,10 +4,13 @@
 	"authors": [
 		"David Cruz <david@bycruz.dev>"
 	],
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"dependencies": {
 		"x11api": {
 			"version": "0.1"
+		},
+		"process": {
+			"version": "^0.1.2"
 		}
 	},
 	"devDependencies": {

@@ -16,6 +16,7 @@ local kernel32 = require("winapi.kernel32")
 local EventLoop = winit.EventLoop
 local Window = winit.Window
 local Clipboard = winit.Clipboard
+local FileDialog = winit.FileDialog
 
 -- Fixture to ensure clean window class state
 ---@param fn fun(eventLoop: winit-win32.EventLoop)
@@ -41,6 +42,11 @@ local function withEventLoop(fn)
 		error(err)
 	end
 end
+
+test.it("offers the system folder dialog", function()
+	test.truthy(FileDialog ~= nil)
+	test.truthy(type(FileDialog.open) == "function")
+end)
 
 test.it("creates an event loop", function()
 	withEventLoop(function(eventLoop)

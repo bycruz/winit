@@ -4,6 +4,7 @@ local xi2 = require("x11api.xi2")
 local wait = require("winit-x11.wait")
 local Clipboard = require("winit-x11.clipboard")
 local Dnd = require("winit-x11.dnd")
+local FileDialog = require("winit-x11.dialog")
 
 ---@class winit-x11.Window
 ---@field id number
@@ -731,4 +732,5 @@ function X11EventLoop:run(callback)
 	end
 end
 
-return { Window = X11Window, EventLoop = X11EventLoop, Clipboard = Clipboard }
+return { Window = X11Window, EventLoop = X11EventLoop, Clipboard = Clipboard,
+	FileDialog = FileDialog }
