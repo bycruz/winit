@@ -121,6 +121,17 @@ local classCount = 0
 
 local ERROR_CLASS_ALREADY_EXISTS = 1410
 
+-- What one notch of a wheel turns by. A finer wheel or a precision touchpad reports a fraction of
+-- it, which is passed on as a fraction of a notch.
+local WHEEL_DELTA = 120
+
+--- How far a wheel message turned, in notches: the signed high word of its wParam.
+---@param wParam winapi.user32.ffi.WPARAM
+---@return number
+local function wheelNotches(wParam)
+	return tonumber(ffi.cast("short", user32.HIWORD(wParam))) / WHEEL_DELTA
+end
+
 ---@param loop winit-win32.EventLoop
 ---@param callback winit.EventHandler
 local function deliverRedraws(loop, callback)
@@ -193,6 +204,15 @@ function Win32EventLoop.new()
 			local x = user32.GET_X_LPARAM(lParam)
 			local y = user32.GET_Y_LPARAM(lParam)
 			self.callback({ window = window, name = "mouseRelease", x = x, y = y }, self.handler)
+			return 0
+		elseif msg == user32.WM.MOUSEWHEEL then
+			-- Turned away from the user is positive here and up a page, where a scroll event counts
+			-- down the page as positive -- one notch is one line, as the other platforms report it.
+			self.callback({ window = window, name = "mouseScroll", dx = 0, dy = -wheelNotches(wParam) }, self.handler)
+			return 0
+		elseif msg == user32.WM.MOUSEHWHEEL then
+			-- A tilt to the right is positive, which is the direction a scroll event counts too.
+			self.callback({ window = window, name = "mouseScroll", dx = wheelNotches(wParam), dy = 0 }, self.handler)
 			return 0
 		elseif msg == user32.WM.CLOSE then
 			self.callback({ window = window, name = "windowClose" }, self.handler)

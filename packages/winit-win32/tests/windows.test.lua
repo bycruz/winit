@@ -311,6 +311,52 @@ test.it("reports the files a drop carried, and where it was let go of", function
 	end)
 end)
 
+test.it("reports a wheel as scroll events in notches, down the page positive", function()
+	withEventLoop(function(eventLoop)
+		local window = Window.new(eventLoop, 400, 300)
+		eventLoop:register(window)
+
+		-- The delta is the signed high word of wParam, in multiples of 120: a notch away from the
+		-- user, a notch towards them, half a notch of a finer wheel, and a tilt to the right. Windows
+		-- builds wParam from 32 bits, so the word above them is zero rather than the delta's sign.
+		local function wheel(message, delta)
+			local wParam = ffi.cast("uintptr_t", ffi.cast("uint32_t", bit.lshift(bit.band(delta, 0xFFFF), 16)))
+			test.equal(user32.postMessage(window.hwnd, message, wParam, 0), true)
+		end
+		wheel(user32.WM.MOUSEWHEEL, 120)
+		wheel(user32.WM.MOUSEWHEEL, -120)
+		wheel(user32.WM.MOUSEWHEEL, -60)
+		wheel(user32.WM.MOUSEHWHEEL, 120)
+
+		---@type winit.Event[]
+		local scrolls = {}
+		local frames = 0
+
+		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
+			handler:setMode("poll")
+
+			if event.name == "mouseScroll" then
+				scrolls[#scrolls + 1] = event
+			end
+
+			frames = frames + 1
+			if #scrolls == 4 or frames > 200 then
+				handler:exit()
+			end
+		end)
+
+		test.equal(#scrolls, 4, "every wheel message reaches the program")
+		test.equal(scrolls[1].window, window)
+		test.equal(scrolls[1].dy, -1, "a notch away from the user goes up the page")
+		test.equal(scrolls[2].dy, 1, "a notch towards the user goes down the page")
+		test.equal(scrolls[3].dy, 0.5, "a finer wheel reports a fraction of a notch")
+		test.equal(scrolls[4].dx, 1, "a tilt to the right goes right")
+		test.equal(scrolls[4].dy, 0)
+	end)
+end)
+
 --- Whether the program the clipboard tests use as a second one is here. PowerShell reads and
 --- writes the clipboard through the same door every other program does, which is what makes
 --- the exchange below a real one rather than this process talking to itself. What is asked of
