@@ -126,6 +126,196 @@ local ERROR_CLASS_ALREADY_EXISTS = 1410
 -- it, which is passed on as a fraction of a notch.
 local WHEEL_DELTA = 120
 
+-- What a key is, which windows answers from the virtual key code it gives, and what it types, which
+-- is the keyboard layout's answer and comes from the system below: a key's name is the key -- the
+-- letter a binding is written against -- and its text is the character it produced, case and all.
+ffi.cdef [[
+	int GetKeyboardState(uint8_t *lpKeyState);
+	int ToUnicodeEx(unsigned int wVirtKey, unsigned int wScanCode, const uint8_t *lpKeyState,
+		uint16_t *pwszBuff, int cchBuff, unsigned int wFlags, void *dwhkl);
+	void *GetKeyboardLayout(unsigned long idThread);
+]]
+
+-- Held rather than loaded where it is called: a library handle the collector lets go of unloads the
+-- dll behind it, and what this module holds of it then points into nothing.
+local user32Library = ffi.load("user32")
+
+-- The keys this platform names, by virtual key code. A letter, a digit and a punctuation key are
+-- named after what they are on a keyboard rather than after what the layout makes of them, which is
+-- what a binding is written against; the table below fills the letters and digits in.
+local KEY_NAMES = {
+	[0x08] = "backspace",
+	[0x09] = "tab",
+	[0x0D] = "return",
+	[0x10] = "left-shift",
+	[0x11] = "left-ctrl",
+	[0x12] = "left-alt",
+	[0x13] = "pause",
+	[0x14] = "caps-lock",
+	[0x1B] = "escape",
+	[0x20] = "space",
+	[0x21] = "page-up",
+	[0x22] = "page-down",
+	[0x23] = "end",
+	[0x24] = "home",
+	[0x25] = "left",
+	[0x26] = "up",
+	[0x27] = "right",
+	[0x28] = "down",
+	[0x2C] = "print-screen",
+	[0x2D] = "insert",
+	[0x2E] = "delete",
+	[0x5B] = "left-super",
+	[0x5C] = "right-super",
+	[0x5D] = "menu",
+	[0x90] = "num-lock",
+	[0x91] = "scroll-lock",
+	[0x92] = "num-equal",
+	[0x60] = "num-0",
+	[0x61] = "num-1",
+	[0x62] = "num-2",
+	[0x63] = "num-3",
+	[0x64] = "num-4",
+	[0x65] = "num-5",
+	[0x66] = "num-6",
+	[0x67] = "num-7",
+	[0x68] = "num-8",
+	[0x69] = "num-9",
+	[0x6A] = "num-multiply",
+	[0x6B] = "num-add",
+	[0x6C] = "num-separator",
+	[0x6D] = "num-subtract",
+	[0x6E] = "num-decimal",
+	[0x6F] = "num-divide",
+	[0xBA] = ";",
+	[0xBB] = "=",
+	[0xBC] = ",",
+	[0xBD] = "-",
+	[0xBE] = ".",
+	[0xBF] = "/",
+	[0xC0] = "`",
+	[0xDB] = "[",
+	[0xDC] = "\\",
+	[0xDD] = "]",
+	[0xDE] = "'",
+	[0xE2] = "\\",
+}
+
+for at = 0, 9 do
+	KEY_NAMES[0x30 + at] = tostring(at)
+end
+
+for at = 0, 25 do
+	KEY_NAMES[0x41 + at] = string.char(0x61 + at)
+end
+
+for at = 1, 24 do
+	KEY_NAMES[0x6F + at] = "f" .. at
+end
+
+local KEYBOARD_STATE = ffi.new("uint8_t[256]")
+local TYPED_BUFFER = ffi.new("uint16_t[8]")
+
+--- Whether a key is down now. What windows answers with is set in its top bit, and what LuaJIT reads
+--- out of the sixteenth is a small number: both are asked for the same ones and the same zeroes.
+---@param virtual number
+---@return boolean
+local function isDown(virtual)
+	return bit.band(tonumber(user32.getKeyState(virtual)), 0x8000) ~= 0
+end
+
+--- What is held down, as the app is told it with every key: the modifiers a binding and a field are
+--- decided by.
+---@return winit.KeyModifiers
+local function modifiersNow()
+	return {
+		shift = isDown(0x10),
+		ctrl = isDown(0x11),
+		alt = isDown(0x12),
+		super = isDown(0x5B) or isDown(0x5C),
+		lock = bit.band(tonumber(user32.getKeyState(0x14)), 1) ~= 0,
+	}
+end
+
+--- UTF-16 as UTF-8, which is what the rest of winit carries text in.
+---@param units uint16_t[]
+---@param count number
+---@return string
+local function utf8Of(units, count)
+	local out = {}
+
+	for at = 0, count - 1 do
+		local unit = units[at]
+		local codepoint = unit
+
+		if unit >= 0xD800 and unit <= 0xDBFF and at + 1 < count then
+			local low = units[at + 1]
+
+			codepoint = 0x10000 + (unit - 0xD800) * 0x400 + (low - 0xDC00)
+			at = at + 1
+		end
+
+		if codepoint < 0x80 then
+			out[#out + 1] = string.char(codepoint)
+		elseif codepoint < 0x800 then
+			out[#out + 1] = string.char(0xC0 + math.floor(codepoint / 0x40), 0x80 + codepoint % 0x40)
+		elseif codepoint < 0x10000 then
+			out[#out + 1] = string.char(0xE0 + math.floor(codepoint / 0x1000),
+				0x80 + math.floor(codepoint / 0x40) % 0x40, 0x80 + codepoint % 0x40)
+		else
+			out[#out + 1] = string.char(0xF0 + math.floor(codepoint / 0x40000),
+				0x80 + math.floor(codepoint / 0x1000) % 0x40, 0x80 + math.floor(codepoint / 0x40) % 0x40,
+				0x80 + codepoint % 0x40)
+		end
+	end
+
+	return table.concat(out)
+end
+
+--- What a key typed, where it typed anything: the layout's answer for this key with the modifiers
+--- that are held, which is what makes shift and 1 an exclamation mark and a dead key wait for the one
+--- after it. Nought where the key types nothing of its own -- an arrow, a held control.
+---@param virtual number
+---@param scan number
+---@return string?
+local function typedNow(virtual, scan)
+	if user32Library.GetKeyboardState(KEYBOARD_STATE) == 0 then
+		return nil
+	end
+
+	-- The last is the flag that keeps a dead key untouched by being asked: the accent it is waiting
+	-- to put on the next letter is still waiting after this.
+	local count = user32Library.ToUnicodeEx(virtual, scan, KEYBOARD_STATE, TYPED_BUFFER, 8, 1,
+		user32Library.GetKeyboardLayout(0))
+
+	if count <= 0 then
+		return nil
+	end
+
+	local text = utf8Of(TYPED_BUFFER, count)
+
+	return text ~= "" and text or nil
+end
+
+--- The name a key is told by: what it is on a keyboard, and failing that what it typed, which is
+--- how a key a layout puts somewhere else -- the letters of one that is not qwerty -- is named.
+---@param virtual number
+---@param text string?
+---@return string?
+local function keyName(virtual, text)
+	local named = KEY_NAMES[virtual]
+
+	if named ~= nil then
+		return named
+	end
+
+	if text ~= nil then
+		return text:lower()
+	end
+
+	return nil
+end
+
 --- How far a wheel message turned, in notches: the signed high word of its wParam.
 ---@param wParam winapi.user32.ffi.WPARAM
 ---@return number
@@ -217,6 +407,51 @@ function Win32EventLoop.new()
 			return 0
 		elseif msg == user32.WM.CLOSE then
 			self.callback({ window = window, name = "windowClose" }, self.handler)
+			return 0
+		elseif msg == user32.WM.KEYDOWN or msg == user32.WM.SYSKEYDOWN then
+			-- The virtual key code is the low byte of wParam; what the message says of the press is in
+			-- lParam: the scan code the layout is asked with, and whether the keyboard is repeating a
+			-- key it has held. A press that types nothing of its own -- an arrow, a control -- is
+			-- named by the table, and one that does is named by what it typed.
+			local virtual = tonumber(bit.band(wParam, 0xFF))
+			local scan = tonumber(bit.band(bit.rshift(tonumber(lParam), 16), 0xFF))
+			local repeated = bit.band(tonumber(lParam), 0x40000000) ~= 0
+			local modifiers = modifiersNow()
+			local text = typedNow(virtual, scan)
+			local key = keyName(virtual, text)
+
+			if key ~= nil then
+				self.callback({
+					window = window,
+					name = "keyPress",
+					key = key,
+					modifiers = modifiers,
+					text = text,
+					repeated = repeated and true or nil,
+				}, self.handler)
+			end
+
+			-- A system key is still the system's: alt and F4 close the window, and a key that is
+			-- taken and not answered would be one nothing ever handles.
+			if msg == user32.WM.SYSKEYDOWN then
+				return user32.defWindowProc(hwnd, msg, wParam, lParam)
+			end
+
+			return 0
+		elseif msg == user32.WM.KEYUP or msg == user32.WM.SYSKEYUP then
+			local virtual = tonumber(bit.band(wParam, 0xFF))
+			local text = typedNow(virtual, tonumber(bit.band(bit.rshift(tonumber(lParam), 16), 0xFF)))
+			local key = keyName(virtual, text)
+
+			if key ~= nil then
+				self.callback({ window = window, name = "keyRelease", key = key, modifiers = modifiersNow() },
+					self.handler)
+			end
+
+			if msg == user32.WM.SYSKEYUP then
+				return user32.defWindowProc(hwnd, msg, wParam, lParam)
+			end
+
 			return 0
 		elseif msg == user32.WM.DROPFILES then
 			-- What a drag carried, which the shell hands over as one thing to read the files out
