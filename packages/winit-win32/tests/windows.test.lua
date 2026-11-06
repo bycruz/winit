@@ -382,6 +382,69 @@ test.it("reports a wheel as scroll events in notches, down the page positive", f
 	end)
 end)
 
+test.it("reports the keys of the keyboard, and what they type", function()
+	withEventLoop(function(eventLoop)
+		local window = Window.new(eventLoop, 400, 300)
+		eventLoop:register(window)
+
+		-- A press is a virtual key code in the low byte of wParam and its scan code in lParam, which
+		-- is what the layout is asked with: the same message the keyboard sends.
+		local function key(message, virtual, scan, flags)
+			local wParam = ffi.cast("uintptr_t", virtual)
+			local lParam = ffi.cast("intptr_t", bit.bor(bit.lshift(scan, 16), flags or 0))
+			test.equal(user32.postMessage(window.hwnd, message, wParam, lParam), true)
+		end
+
+		local A, LEFT, BACKSPACE, SHIFT = 0x41, 0x25, 0x08, 0x10
+		key(user32.WM.KEYDOWN, A, 0x1E)
+		key(user32.WM.KEYUP, A, 0x1E)
+		key(user32.WM.KEYDOWN, LEFT, 0x4B)
+		key(user32.WM.KEYUP, LEFT, 0x4B)
+		key(user32.WM.KEYDOWN, BACKSPACE, 0x0E)
+		key(user32.WM.KEYUP, BACKSPACE, 0x0E)
+		-- A press the keyboard says is a repeat of one it is holding: the thirty-first bit of lParam.
+		key(user32.WM.KEYDOWN, A, 0x1E, 0x40000000)
+
+		---@type winit.Event[]
+		local keys = {}
+		local frames = 0
+
+		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
+			handler:setMode("poll")
+
+			if event.name == "keyPress" or event.name == "keyRelease" then
+				keys[#keys + 1] = event
+			end
+
+			frames = frames + 1
+			if #keys == 7 or frames > 200 then
+				handler:exit()
+			end
+		end)
+
+		test.equal(#keys, 7, "every key message reaches the program")
+
+		test.equal(keys[1].name, "keyPress")
+		test.equal(keys[1].key, "a", "a letter is named by the letter, not by what the shift makes of it")
+		test.equal(keys[1].text, "a", "and is told with what it typed")
+		test.equal(keys[1].window, window)
+		test.equal(keys[1].repeated, nil, "a press of its own is not a repeat")
+
+		test.equal(keys[2].name, "keyRelease")
+		test.equal(keys[2].key, "a")
+
+		test.equal(keys[3].key, "left", "a key that types nothing is named for itself")
+		test.equal(keys[3].text, nil, "and types nothing")
+
+		test.equal(keys[5].key, "backspace")
+
+		test.equal(keys[7].key, "a")
+		test.equal(keys[7].repeated, true, "a press the keyboard says is a repeat is marked as one")
+	end)
+end)
+
 --- Whether the program the clipboard tests use as a second one is here. PowerShell reads and
 --- writes the clipboard through the same door every other program does, which is what makes
 --- the exchange below a real one rather than this process talking to itself. What is asked of
