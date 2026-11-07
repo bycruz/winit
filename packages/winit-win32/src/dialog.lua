@@ -63,14 +63,16 @@ local FOS_PATHMUSTEXIST = 0x800
 local FOS_FILEMUSTEXIST = 0x1000
 local FOS_NOCHANGEDIR = 0x8
 
--- The IFileDialog slots used here; GetResults is the first IFileOpenDialog method after that
--- interface's common block.
+-- The IFileDialog slots used here, counted from QueryInterface: Show is the first of its own, and
+-- GetResults is the first of IFileOpenDialog's, after the twenty-seven IFileDialog inherits from
+-- IUnknown and declares itself. Reading a result through the wrong slot is what a dialog asks for
+-- when it is answered -- slot 21 is AddPlace, which takes an IShellItem and this cannot spell.
 local IFileDialog_Show = 3
 local IFileDialog_SetFileTypes = 4
 local IFileDialog_SetFileTypeIndex = 5
 local IFileDialog_SetOptions = 9
 local IFileDialog_SetTitle = 17
-local IFileOpenDialog_GetResults = 21
+local IFileOpenDialog_GetResults = 27
 
 local IUnknown_Release = 2
 local IShellItem_GetDisplayName = 5
