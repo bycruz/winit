@@ -10,6 +10,8 @@
 -- list of filesystem paths, empty when it was cancelled.
 local ffi = require("ffi")
 local kernel32 = require("winapi.kernel32")
+local com = require("winit-win32.com")
+local method = com.method
 
 local ole32 = ffi.load("ole32")
 
@@ -61,14 +63,16 @@ local FOS_PATHMUSTEXIST = 0x800
 local FOS_FILEMUSTEXIST = 0x1000
 local FOS_NOCHANGEDIR = 0x8
 
--- The IFileDialog slots used here; GetResults is the first IFileOpenDialog method after that
--- interface's common block.
+-- The IFileDialog slots used here, counted from QueryInterface: Show is the first of its own, and
+-- GetResults is the first of IFileOpenDialog's, after the twenty-seven IFileDialog inherits from
+-- IUnknown and declares itself. Reading a result through the wrong slot is what a dialog asks for
+-- when it is answered -- slot 21 is AddPlace, which takes an IShellItem and this cannot spell.
 local IFileDialog_Show = 3
 local IFileDialog_SetFileTypes = 4
 local IFileDialog_SetFileTypeIndex = 5
 local IFileDialog_SetOptions = 9
 local IFileDialog_SetTitle = 17
-local IFileOpenDialog_GetResults = 21
+local IFileOpenDialog_GetResults = 27
 
 local IUnknown_Release = 2
 local IShellItem_GetDisplayName = 5
@@ -90,15 +94,6 @@ local function guid(fields)
 	for index = 4, 11 do value.Data4[index - 4] = fields[index] end
 
 	return value
-end
-
----@param object ffi.cdata*
----@param index number
----@param signature string
----@return ffi.cdata*
-local function method(object, index, signature)
-	local vtable = ffi.cast("void **", object)[0]
-	return ffi.cast(signature, vtable[index])
 end
 
 ---@param item ffi.cdata*
