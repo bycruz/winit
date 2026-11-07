@@ -48,6 +48,25 @@ test.it("offers the system folder dialog", function()
 	test.truthy(type(FileDialog.open) == "function")
 end)
 
+test.it("calls a method of a COM object through its vtable", function()
+	-- A COM object is a pointer to a pointer to an array of function pointers. Whatever is cast to
+	-- reach it has to leave the array typed, or nothing can be read out of it: what this checks is
+	-- the cast, with an object of this test's own rather than one of Windows'.
+	local com = require("winit-win32.com")
+
+	local answer = ffi.cast("int (*)(int)", function(argument)
+		return argument + 1
+	end)
+	local vtable = ffi.new("void *[4]")
+	vtable[3] = ffi.cast("void *", answer)
+
+	local object = ffi.new("void *[1]")
+	object[0] = ffi.cast("void *", vtable)
+
+	local call = com.method(ffi.cast("void *", object), 3, "int (*)(int)")
+	test.equal(tonumber(call(41)), 42, "the fourth slot of the vtable is the one called")
+end)
+
 test.it("leaves the COM entry points to the rest of the process", function()
 	-- What an audio library declares after winit is loaded: its own GUID struct, and
 	-- CoCreateInstance taking it. winit loaded first must not have claimed that name with a

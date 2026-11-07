@@ -10,6 +10,8 @@
 -- list of filesystem paths, empty when it was cancelled.
 local ffi = require("ffi")
 local kernel32 = require("winapi.kernel32")
+local com = require("winit-win32.com")
+local method = com.method
 
 local ole32 = ffi.load("ole32")
 
@@ -90,15 +92,6 @@ local function guid(fields)
 	for index = 4, 11 do value.Data4[index - 4] = fields[index] end
 
 	return value
-end
-
----@param object ffi.cdata*
----@param index number
----@param signature string
----@return ffi.cdata*
-local function method(object, index, signature)
-	local vtable = ffi.cast("void **", object)[0]
-	return ffi.cast(signature, vtable[index])
 end
 
 ---@param item ffi.cdata*
