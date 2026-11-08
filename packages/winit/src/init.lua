@@ -47,6 +47,8 @@ local backendApi = backend --[[@as winit.Backend]]
 ---@field resetCursor fun(self: winit.Window)
 ---@field setCursorGrab fun(self: winit.Window, mode: winit.CursorGrab)
 ---@field setIcon (fun(self: winit.Window, width: number, height: number, rgba: string))? # A square picture for the title bar, where the backend has one
+---@field captureMediaKeys (fun(self: winit.Window): string[])? # Takes the play, stop, next and previous keys whether or not the window has focus, where the backend can; returns the ones another program already holds
+---@field releaseMediaKeys (fun(self: winit.Window))? # Gives back what captureMediaKeys took; destroying the window does too
 local Window = backendApi.Window
 
 ---@param eventLoop winit.EventLoop
@@ -55,6 +57,9 @@ function Window.fromEventLoop(eventLoop) ---@return winit.Window
 	eventLoop:register(window)
 	return window
 end
+
+--- A media key or a media button: on a keyboard, a headset or a remote, or a mouse button set to one.
+---@alias winit.MediaAction "playPause" | "play" | "pause" | "stop" | "next" | "previous"
 
 ---@alias winit.KeyModifiers { shift: boolean, lock: boolean, ctrl: boolean, alt: boolean, super: boolean }
 
@@ -85,6 +90,7 @@ end
 --- | { window: winit.Window, name: "focusIn" }
 --- | { window: winit.Window, name: "focusOut" }
 --- | { window: winit.Window, name: "fileDrop", paths: string[], x: number, y: number }
+--- | { window: winit.Window, name: "mediaKey", action: winit.MediaAction }
 
 --- A window's clipboard: what a program copies to and pastes from. A platform hands its
 --- clipboard around as a whole, so what this is a handle on is the system's, not a window's --

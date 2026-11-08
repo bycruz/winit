@@ -464,6 +464,70 @@ test.it("reports the keys of the keyboard, and what they type", function()
 	end)
 end)
 
+test.it("reports media buttons and the media keys it took", function()
+	withEventLoop(function(eventLoop)
+		local window = Window.new(eventLoop, 400, 300)
+		eventLoop:register(window)
+
+		local WM_APPCOMMAND, WM_HOTKEY = 0x0319, 0x0312
+		-- A headset's play button: the command in the high word of lParam, under the four bits that
+		-- say what sent it -- here a device of its own, which is what has to be cut off to read it.
+		local function command(number, device)
+			local lParam = ffi.cast("intptr_t", bit.lshift(bit.bor(number, device or 0), 16))
+			test.equal(user32.postMessage(window.hwnd, WM_APPCOMMAND, ffi.cast("uintptr_t", window.hwnd), lParam), true)
+		end
+		command(14, 0x1000)
+		command(47)
+		-- A media key the window took comes back as a hot key under its virtual key code.
+		test.equal(user32.postMessage(window.hwnd, WM_HOTKEY, ffi.cast("uintptr_t", 0xB2), 0), true)
+
+		---@type winit.Event[]
+		local media = {}
+		local frames = 0
+
+		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
+			handler:setMode("poll")
+
+			if event.name == "mediaKey" then
+				media[#media + 1] = event
+			end
+
+			frames = frames + 1
+			if #media == 3 or frames > 200 then
+				handler:exit()
+			end
+		end)
+
+		test.equal(#media, 3, "every media message reaches the program")
+		test.equal(media[1].window, window)
+		test.equal(media[1].action, "playPause", "whatever device sent it")
+		test.equal(media[2].action, "pause")
+		test.equal(media[3].action, "stop")
+	end)
+end)
+
+test.it("takes the media keys once, and gives them back", function()
+	withEventLoop(function(eventLoop)
+		local window = Window.new(eventLoop, 400, 300)
+		eventLoop:register(window)
+
+		-- Another program on this machine may hold some of them; what this one cannot take is said,
+		-- by name, rather than failing.
+		local refused = window:captureMediaKeys()
+		test.equal(type(refused), "table")
+		for _, action in ipairs(refused) do
+			test.truthy(action == "playPause" or action == "stop" or action == "next" or action == "previous")
+		end
+		test.deepEqual(window:captureMediaKeys(), {}, "a key already taken is not asked for again")
+
+		window:releaseMediaKeys()
+		test.equal(window.mediaKeys, nil)
+		test.deepEqual(window:captureMediaKeys(), refused, "given back, the same keys can be taken again")
+	end)
+end)
+
 --- Whether the program the clipboard tests use as a second one is here. PowerShell reads and
 --- writes the clipboard through the same door every other program does, which is what makes
 --- the exchange below a real one rather than this process talking to itself. What is asked of
