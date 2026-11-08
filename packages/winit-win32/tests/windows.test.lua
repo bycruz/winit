@@ -427,6 +427,57 @@ test.it("reports a wheel as scroll events in notches, down the page positive", f
 	end)
 end)
 
+test.it("reports every mouse button, numbered as every backend numbers them", function()
+	withEventLoop(function(eventLoop)
+		local window = Window.new(eventLoop, 400, 300)
+		eventLoop:register(window)
+
+		-- Where the pointer is goes in lParam: x in the low word, y in the high one.
+		local function click(message, x, y)
+			test.equal(user32.postMessage(window.hwnd, message, 0, bit.bor(x, bit.lshift(y, 16))), true)
+		end
+		click(user32.WM.LBUTTONDOWN, 10, 20)
+		click(user32.WM.LBUTTONUP, 10, 20)
+		click(user32.WM.RBUTTONDOWN, 30, 40)
+		click(user32.WM.RBUTTONUP, 31, 41)
+		click(user32.WM.MBUTTONDOWN, 50, 60)
+		click(user32.WM.MBUTTONUP, 50, 60)
+
+		---@type winit.Event[]
+		local presses = {}
+		local frames = 0
+
+		eventLoop:run(function(event, handler)
+			---@cast event winit.Event
+			---@cast handler winit.EventManager
+			handler:setMode("poll")
+
+			if event.name == "mousePress" or event.name == "mouseRelease" then
+				presses[#presses + 1] = event
+			end
+
+			frames = frames + 1
+			if #presses == 6 or frames > 200 then
+				handler:exit()
+			end
+		end)
+
+		test.equal(#presses, 6, "every button's press and release reaches the program")
+		local expected = {
+			{ "mousePress", 1, 10, 20 }, { "mouseRelease", 1, 10, 20 },
+			{ "mousePress", 3, 30, 40 }, { "mouseRelease", 3, 31, 41 },
+			{ "mousePress", 2, 50, 60 }, { "mouseRelease", 2, 50, 60 },
+		}
+		for at, want in ipairs(expected) do
+			local got = presses[at]
+			test.equal(got.name, want[1])
+			test.equal(got.button, want[2], "left is 1, middle 2 and right 3")
+			test.equal(got.x, want[3])
+			test.equal(got.y, want[4])
+		end
+	end)
+end)
+
 test.it("reports the keys of the keyboard, and what they type", function()
 	withEventLoop(function(eventLoop)
 		local window = Window.new(eventLoop, 400, 300)
