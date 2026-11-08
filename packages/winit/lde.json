@@ -4,7 +4,7 @@
 	"authors": [
 		"David Cruz <david@bycruz.dev>"
 	],
-	"version": "0.1.12",
+	"version": "0.1.13",
 	"dependencies": {
 		"winit-x11": {
 			"path": "../winit-x11",
