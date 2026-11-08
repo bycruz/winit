@@ -6,6 +6,10 @@ local Clipboard = require("winit-win32.clipboard")
 local FileDialog = require("winit-win32.dialog")
 local readDrop = require("winit-win32.drop")
 
+-- user32 as this module declares it, loaded below with the calls it is declared with. Named here so
+-- the window's own methods, written before it, can reach it.
+local user32Library
+
 --- Casts a ffi pointer to a lua number for use as a hash key.
 ---@param value ffi.cdata*
 local function ffiptrToDouble(value)
@@ -20,6 +24,7 @@ end
 ---@field width number
 ---@field height number
 ---@field shouldRedraw boolean?
+---@field mediaKeys table<number, boolean>? # The media keys this window took, by virtual key code
 local Win32Window = {}
 Win32Window.__index = Win32Window
 
@@ -100,6 +105,7 @@ end
 
 
 function Win32Window:destroy()
+	self:releaseMediaKeys()
 	user32.destroyWindow(self.hwnd)
 end
 
@@ -134,11 +140,13 @@ ffi.cdef [[
 	int ToUnicodeEx(unsigned int wVirtKey, unsigned int wScanCode, const uint8_t *lpKeyState,
 		uint16_t *pwszBuff, int cchBuff, unsigned int wFlags, void *dwhkl);
 	void *GetKeyboardLayout(unsigned long idThread);
+	int RegisterHotKey(void *hWnd, int id, unsigned int fsModifiers, unsigned int vk);
+	int UnregisterHotKey(void *hWnd, int id);
 ]]
 
 -- Held rather than loaded where it is called: a library handle the collector lets go of unloads the
 -- dll behind it, and what this module holds of it then points into nothing.
-local user32Library = ffi.load("user32")
+user32Library = ffi.load("user32")
 
 -- The keys this platform names, by virtual key code. A letter, a digit and a punctuation key are
 -- named after what they are on a keyboard rather than after what the layout makes of them, which is
@@ -211,6 +219,63 @@ end
 
 for at = 1, 24 do
 	KEY_NAMES[0x6F + at] = "f" .. at
+end
+
+-- The media keys: on a keyboard's own row, or what a mouse's software sends when one of its buttons
+-- is set to stop a track. Each is taken by its virtual key code, which is also the id the hot key is
+-- registered under, so the message it comes back as says which one it was.
+local MEDIA_KEYS = {
+	[0xB0] = "next",
+	[0xB1] = "previous",
+	[0xB2] = "stop",
+	[0xB3] = "playPause",
+}
+
+-- What a headset's or a remote's buttons send instead of a key, by the command number in the high
+-- word of lParam -- and what a media key comes back as when the focused window lets the system have it.
+local APP_COMMANDS = {
+	[11] = "next",
+	[12] = "previous",
+	[13] = "stop",
+	[14] = "playPause",
+	[46] = "play",
+	[47] = "pause",
+}
+
+local WM_HOTKEY = 0x0312
+local WM_APPCOMMAND = 0x0319
+-- A key held down is one press, not one per repeat of the keyboard.
+local MOD_NOREPEAT = 0x4000
+
+--- Takes the media keys for this window, whether it has focus or not: a music player is told about
+--- the play key while another program is in front. A key is the first taker's, so one another
+--- program already holds cannot be taken; those are the ones returned, by name.
+---@return string[] refused
+function Win32Window:captureMediaKeys()
+	local refused = {}
+	self.mediaKeys = self.mediaKeys or {}
+
+	for virtual, action in pairs(MEDIA_KEYS) do
+		if not self.mediaKeys[virtual] then
+			if user32Library.RegisterHotKey(self.hwnd, virtual, MOD_NOREPEAT, virtual) ~= 0 then
+				self.mediaKeys[virtual] = true
+			else
+				refused[#refused + 1] = action
+			end
+		end
+	end
+
+	table.sort(refused)
+	return refused
+end
+
+--- Gives the media keys back, so the program the system hands them to next is told about them.
+function Win32Window:releaseMediaKeys()
+	if self.mediaKeys == nil then return end
+	for virtual in pairs(self.mediaKeys) do
+		user32Library.UnregisterHotKey(self.hwnd, virtual)
+	end
+	self.mediaKeys = nil
 end
 
 local KEYBOARD_STATE = ffi.new("uint8_t[256]")
@@ -432,8 +497,10 @@ function Win32EventLoop.new()
 			end
 
 			-- A system key is still the system's: alt and F4 close the window, and a key that is
-			-- taken and not answered would be one nothing ever handles.
-			if msg == user32.WM.SYSKEYDOWN then
+			-- taken and not answered would be one nothing ever handles. So is a key this has no name
+			-- for: a media or volume key the system turns into the command it is, which comes back
+			-- below as a media key or goes on to the volume it turns.
+			if msg == user32.WM.SYSKEYDOWN or key == nil then
 				return user32.defWindowProc(hwnd, msg, wParam, lParam)
 			end
 
@@ -448,11 +515,29 @@ function Win32EventLoop.new()
 					self.handler)
 			end
 
-			if msg == user32.WM.SYSKEYUP then
+			if msg == user32.WM.SYSKEYUP or key == nil then
 				return user32.defWindowProc(hwnd, msg, wParam, lParam)
 			end
 
 			return 0
+		elseif msg == WM_HOTKEY then
+			-- A media key this window took: the id it was taken under is the key.
+			local action = MEDIA_KEYS[tonumber(wParam)]
+			if action ~= nil then
+				self.callback({ window = window, name = "mediaKey", action = action }, self.handler)
+			end
+			return 0
+		elseif msg == WM_APPCOMMAND then
+			-- The command is the high word of lParam less its top four bits, which say what sent it:
+			-- a key, the mouse or another device. One that is not a media key -- volume, a browser's
+			-- back -- is passed on, so the system or the window behind this one can do it.
+			local command = bit.band(tonumber(user32.HIWORD(lParam)), 0x0FFF)
+			local action = APP_COMMANDS[command]
+			if action == nil then
+				return user32.defWindowProc(hwnd, msg, wParam, lParam)
+			end
+			self.callback({ window = window, name = "mediaKey", action = action }, self.handler)
+			return 1
 		elseif msg == user32.WM.DROPFILES then
 			-- What a drag carried, which the shell hands over as one thing to read the files out
 			-- of and be done with -- so what is passed on is the paths, and the drop itself is
