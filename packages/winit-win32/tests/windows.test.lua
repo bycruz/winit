@@ -195,16 +195,42 @@ test.it("invalidates window handle after destroy", function()
 	end)
 end)
 
-test.it("sets cursor without error", function()
+test.it("keeps the cursor it was given when the pointer moves", function()
 	withEventLoop(function(eventLoop)
 		local window = Window.new(eventLoop, 200, 200)
 		eventLoop:register(window)
 
-		window:setCursor("pointer")
-		window:setCursor("hand2")
-		window:resetCursor()
+		ffi.cdef("void *GetCursor(void);")
+		local cursorNow = ffi.load("user32").GetCursor
+		local hand = user32.loadCursor(nil, ffi.cast("LPCSTR", user32.IDC.HAND))
+		local arrow = user32.loadCursor(nil, ffi.cast("LPCSTR", user32.IDC.ARROW))
+		local WM_SETCURSOR, HTCLIENT, HTLEFT = 0x0020, 1, 10
+		-- What Windows sends on every move of the pointer: where in the window it is in the low word
+		-- of lParam, and the mouse message that moved it in the high word.
+		local function moved(where)
+			local lParam = ffi.cast("intptr_t", bit.bor(where, bit.lshift(user32.WM.MOUSEMOVE, 16)))
+			user32.sendMessage(window.hwnd, WM_SETCURSOR, ffi.cast("uintptr_t", window.hwnd), lParam)
+		end
 
-		window:destroy()
+		local inside, onBorder, afterReset
+		eventLoop:run(function(_, handler)
+			---@cast handler winit.EventManager
+			window:setCursor("hand2")
+			moved(HTCLIENT)
+			inside = cursorNow() == hand
+
+			moved(HTLEFT)
+			onBorder = cursorNow() ~= hand
+
+			window:resetCursor()
+			moved(HTCLIENT)
+			afterReset = cursorNow() == arrow
+			handler:exit()
+		end)
+
+		test.truthy(inside, "a move inside the window keeps the hand")
+		test.truthy(onBorder, "a move onto the border is the system's to draw")
+		test.truthy(afterReset, "a reset is the arrow again")
 	end)
 end)
 

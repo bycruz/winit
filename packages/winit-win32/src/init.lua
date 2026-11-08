@@ -20,7 +20,7 @@ end
 ---@field display winapi.user32.ffi.HDC
 ---@field id ffi.cdata*
 ---@field hwnd winapi.user32.ffi.HWND
----@field currentCursor ffi.cdata*?
+---@field currentCursor ffi.cdata*? # The cursor the app asked for, put back on every mouse move
 ---@field width number
 ---@field height number
 ---@field shouldRedraw boolean?
@@ -81,6 +81,9 @@ local cursors = {
 	hand2 = user32.IDC.HAND,
 	text = ffi.cast("LPCSTR", 32513), -- IDC_IBEAM
 }
+
+-- Where in a window the pointer is, as `WM_SETCURSOR` says it: inside, not on a border or caption.
+local HTCLIENT = 1
 
 ---@param shape "pointer" | "hand2" | "text"
 ---@return nil
@@ -470,6 +473,15 @@ function Win32EventLoop.new()
 			-- A tilt to the right is positive, which is the direction a scroll event counts too.
 			self.callback({ window = window, name = "mouseScroll", dx = wheelNotches(wParam), dy = 0 }, self.handler)
 			return 0
+		elseif msg == user32.WM.SETCURSOR then
+			-- Windows asks for a cursor every time the pointer moves, and left to itself puts the
+			-- class's arrow back, so a hand set over a button would last one move. Inside the window
+			-- the cursor is the app's; on a border it is still the system's sizing arrows.
+			if window.currentCursor ~= nil and bit.band(tonumber(lParam), 0xFFFF) == HTCLIENT then
+				user32.setCursor(window.currentCursor)
+				return 1
+			end
+			return user32.defWindowProc(hwnd, msg, wParam, lParam)
 		elseif msg == user32.WM.CLOSE then
 			self.callback({ window = window, name = "windowClose" }, self.handler)
 			return 0
