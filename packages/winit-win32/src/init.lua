@@ -250,6 +250,19 @@ local WM_APPCOMMAND = 0x0319
 -- A key held down is one press, not one per repeat of the keyboard.
 local MOD_NOREPEAT = 0x4000
 
+-- The mouse buttons, by the message Windows sends for each, numbered as every backend reports them:
+-- 1 left, 2 middle, 3 right.
+local BUTTON_PRESSES = {
+	[user32.WM.LBUTTONDOWN] = 1,
+	[user32.WM.MBUTTONDOWN] = 2,
+	[user32.WM.RBUTTONDOWN] = 3,
+}
+local BUTTON_RELEASES = {
+	[user32.WM.LBUTTONUP] = 1,
+	[user32.WM.MBUTTONUP] = 2,
+	[user32.WM.RBUTTONUP] = 3,
+}
+
 --- Takes the media keys for this window, whether it has focus or not: a music player is told about
 --- the play key while another program is in front. A key is the first taker's, so one another
 --- program already holds cannot be taken; those are the ones returned, by name.
@@ -454,15 +467,15 @@ function Win32EventLoop.new()
 			local y = user32.GET_Y_LPARAM(lParam)
 			self.callback({ window = window, name = "mouseMove", x = x, y = y }, self.handler)
 			return 0
-		elseif msg == user32.WM.LBUTTONDOWN then
-			local x = user32.GET_X_LPARAM(lParam)
-			local y = user32.GET_Y_LPARAM(lParam)
-			self.callback({ window = window, name = "mousePress", x = x, y = y }, self.handler)
-			return 0
-		elseif msg == user32.WM.LBUTTONUP then
-			local x = user32.GET_X_LPARAM(lParam)
-			local y = user32.GET_Y_LPARAM(lParam)
-			self.callback({ window = window, name = "mouseRelease", x = x, y = y }, self.handler)
+		elseif BUTTON_PRESSES[msg] ~= nil or BUTTON_RELEASES[msg] ~= nil then
+			local pressed = BUTTON_PRESSES[msg]
+			self.callback({
+				window = window,
+				name = pressed ~= nil and "mousePress" or "mouseRelease",
+				x = user32.GET_X_LPARAM(lParam),
+				y = user32.GET_Y_LPARAM(lParam),
+				button = pressed or BUTTON_RELEASES[msg],
+			}, self.handler)
 			return 0
 		elseif msg == user32.WM.MOUSEWHEEL then
 			-- Turned away from the user is positive here and up a page, where a scroll event counts
