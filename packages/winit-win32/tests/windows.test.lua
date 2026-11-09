@@ -597,7 +597,9 @@ test.it("takes the media keys once, and gives them back", function()
 		for _, action in ipairs(refused) do
 			test.truthy(action == "playPause" or action == "stop" or action == "next" or action == "previous")
 		end
-		test.deepEqual(window:captureMediaKeys(), {}, "a key already taken is not asked for again")
+		-- Another program may still be holding some of them, so what this one holds is what is
+		-- asked for again; what it could not take the first time it cannot take now either.
+		test.deepEqual(window:captureMediaKeys(), refused, "a key taken by this or another program is not asked for again")
 
 		window:releaseMediaKeys()
 		test.equal(window.mediaKeys, nil)

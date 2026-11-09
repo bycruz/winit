@@ -33,12 +33,43 @@ local backendApi = backend --[[@as winit.Backend]]
 
 ---@alias winit.CursorGrab "locked" | "contain" | "none"
 
+--- The picture a tray icon is drawn from: straight RGBA, four bytes a pixel, as an image decodes
+--- to. The backend scales it to the size the shell has room for, which is the system's small icon
+--- at the display's scale.
+---@class winit.TrayIcon
+---@field width number
+---@field height number
+---@field rgba string
+
+--- One line of a tray menu: a choice, or a rule between choices. A choice is what the app is told
+--- about when it is picked, by the id it was given; a separator is `{ separator = true }` and
+--- nothing else, so its id and label are absent.
+---@class winit.TrayItem
+---@field id string? # What the app is told back when this line is picked
+---@field label string? # What the line says
+---@field checked boolean? # Drawn with its tick, where the choice is one of a set
+---@field disabled boolean? # Shown and refused
+---@field default boolean? # The one the menu opens on, and the one an activated icon picks
+---@field separator boolean? # A rule rather than a choice
+
+--- What a window's icon in the notification area shows and offers: a picture, what the pointer over
+--- it says, and the menu a right click or the keyboard's context key opens.
+---@class winit.Tray
+---@field icon winit.TrayIcon
+---@field tooltip string? # What the pointer over the icon says; the backend cuts it to what the shell allows
+---@field menu winit.TrayItem[]? # The choices offered, in the order they are drawn
+
 ---@class winit.Window
 ---@field id any?
 ---@field width number
 ---@field height number
 ---@field shouldRedraw boolean
 ---@field frameAsked boolean? # The window manager asked for a frame, and waits to be told it is ready
+---@field visible boolean? # Whether the window is on the screen: false while it is hidden or minimized, nothing where the backend keeps no track of it
+---@field hide (fun(self: winit.Window))? # Take the window off the screen and off the taskbar, its loop and its media keys still working
+---@field show (fun(self: winit.Window))? # Bring a hidden or minimized window back, restored, in front and with the keyboard
+---@field setTray (fun(self: winit.Window, tray: winit.Tray): boolean)? # Put or update this window's icon in the notification area; false where the shell refused it
+---@field removeTray (fun(self: winit.Window))? # Take the icon out of the notification area; destroying the window does too
 ---@field new fun(eventLoop: winit.EventLoop, width: number, height: number): winit.Window
 ---@field fromEventLoop fun(eventLoop: winit.EventLoop): winit.Window
 ---@field destroy fun(self: winit.Window)
@@ -80,6 +111,10 @@ end
 --- | { window: winit.Window, name: "map" }
 --- | { window: winit.Window, name: "create" }
 --- | { window: winit.Window, name: "unmap" }
+--- | { window: winit.Window, name: "minimize" }
+--- | { window: winit.Window, name: "restore" }
+--- | { window: winit.Window, name: "trayClick" }
+--- | { window: winit.Window, name: "trayMenu", id: string }
 --- | { window: winit.Window, name: "mouseMove", x: number, y: number }
 --- | { name: "mouseMotion", dx: number, dy: number }
 --- | { window: winit.Window, name: "mouseScroll", dx: number, dy: number }
@@ -177,12 +212,21 @@ end
 
 ---@alias winit.EventLoopMode "poll" | "wait"
 
+--- What a program does to the loop it runs in: end it, close a window, ask for a frame, and choose
+--- how the loop waits, and how long for.
+---
+--- `setTimeout` is the only timer the loop has. A program with something to do on its own -- a
+--- caret to blink, a key repeating, a frame the display's clock has not come to yet -- says how
+--- long from now it wants the loop back, and is asked again at every `aboutToWait`; the loop waits
+--- for an event or for that deadline, whichever comes first, and a deadline is a wait's whole
+--- length at most. `nil` is a wait with no end to it, which is what a program with nothing to do
+--- on its own asks for.
 ---@class winit.EventManager
 ---@field exit fun(self: winit.EventManager)
 ---@field close fun(self: winit.EventManager, window: winit.Window)
 ---@field requestRedraw fun(self: winit.EventManager, window: winit.Window)
 ---@field setMode fun(self: winit.EventManager, mode: winit.EventLoopMode)
----@field setTimeout fun(self: winit.EventManager, seconds: number?) # How long the next wait may last, or nothing to wait out an event
+---@field setTimeout fun(self: winit.EventManager, seconds: number?) # How long the next wait may last, in seconds, or nothing to wait out an event
 
 ---@alias winit.EventHandler fun(event: winit.Event, handler: winit.EventManager)
 

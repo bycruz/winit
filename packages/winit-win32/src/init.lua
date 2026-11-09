@@ -5,6 +5,7 @@ local shell32 = require("winapi.shell32")
 local Clipboard = require("winit-win32.clipboard")
 local FileDialog = require("winit-win32.dialog")
 local readDrop = require("winit-win32.drop")
+local Tray = require("winit-win32.tray")
 
 -- user32 as this module declares it, loaded below with the calls it is declared with. Named here so
 -- the window's own methods, written before it, can reach it.
@@ -24,6 +25,11 @@ end
 ---@field width number
 ---@field height number
 ---@field shouldRedraw boolean?
+---@field visible boolean # On the screen: not minimized, and not hidden behind its tray icon
+---@field shown boolean # WS_VISIBLE, as the shell last said it: a minimized window is shown but not visible
+---@field minimized boolean
+---@field loop winit-win32.EventLoop
+---@field tray winit-win32.TrayState?
 ---@field mediaKeys table<number, boolean>? # The media keys this window took, by virtual key code
 local Win32Window = {}
 Win32Window.__index = Win32Window
@@ -70,7 +76,8 @@ function Win32Window.new(eventLoop, width, height)
 	shell32.dragAcceptFiles(window, true)
 
 	local made = setmetatable({ hwnd = window, id = ffiptrToDouble(window), width = width,
-		height = height }, Win32Window)
+		height = height, visible = true, shown = true, minimized = false, loop = eventLoop },
+		Win32Window)
 	made.cursors = { text = true}
 	return made
 end
@@ -106,8 +113,65 @@ function Win32Window:setTitle(title)
 	return nil
 end
 
+--- Takes the window off the screen and off the taskbar, where a program keeps running behind its
+--- icon in the notification area: the window, its loop and the keys it took keep working, and the
+--- shell is told by the unmap that follows.
+---@return nil
+function Win32Window:hide()
+	user32.showWindow(self.hwnd, user32.ShowWindow.HIDE)
+	return nil
+end
+
+--- Brings a hidden or minimized window back to the size it had, in front and with the keyboard --
+--- what its icon in the notification area is clicked for.
+---@return nil
+function Win32Window:show()
+	local wasShown = self.shown
+	local wasVisible = self.visible
+
+	-- Restoring both shows a hidden window and takes a minimized one out of the taskbar, which is
+	-- the state a window coming back from its icon is wanted in.
+	user32.showWindow(self.hwnd, user32.ShowWindow.RESTORE)
+	user32Library.winit_SetForegroundWindow(self.hwnd)
+
+	-- The shell does not always say so: a window that is hidden and minimized at once -- the
+	-- state one sent to its icon from the taskbar is in -- is shown by the restore without a
+	-- WM_SHOWWINDOW, and a window that was only minimized was shown all along. So the window is
+	-- asked, and the map is said here whenever the shell did not say it.
+	local told = not wasShown and self.shown
+	if user32.isWindowVisible(self.hwnd) then
+		self.shown = true
+		self.visible = not self.minimized
+	end
+
+	if self.visible and not wasVisible and not told then
+		local loop = self.loop
+		if loop.callback then
+			loop.callback({ window = self, name = "map" }, loop.handler)
+		end
+	end
+
+	return nil
+end
+
+--- Puts this window's icon in the notification area, or updates the one already there.
+---@param tray winit.Tray
+---@return boolean accepted
+function Win32Window:setTray(tray)
+	return Tray.set(self, tray)
+end
+
+--- Takes the icon out of the notification area; destroying the window does too.
+---@return nil
+function Win32Window:removeTray()
+	Tray.remove(self)
+	return nil
+end
 
 function Win32Window:destroy()
+	-- The icon goes before the window it belongs to does: the shell keeps the icon under the
+	-- window's handle, and a handle that is gone is one it cannot be told to drop it from.
+	Tray.remove(self)
 	self:releaseMediaKeys()
 	user32.destroyWindow(self.hwnd)
 end
@@ -117,6 +181,7 @@ end
 ---@field class winapi.user32.ffi.WNDCLASSEXA
 ---@field isActive boolean
 ---@field currentMode "poll" | "wait"
+---@field timeout number? # How long the next wait may last, in seconds, or nothing for a wait with no end to it
 ---@field handler winit.EventManager
 ---@field callback winit.EventHandler
 local Win32EventLoop = {}
@@ -145,11 +210,34 @@ ffi.cdef [[
 	void *GetKeyboardLayout(unsigned long idThread);
 	int RegisterHotKey(void *hWnd, int id, unsigned int fsModifiers, unsigned int vk);
 	int UnregisterHotKey(void *hWnd, int id);
+
+	int winit_SetForegroundWindow(void *hWnd) __asm__("SetForegroundWindow");
+	int winit_ValidateRect(void *hWnd, const void *rect) __asm__("ValidateRect");
+	unsigned long winit_MsgWaitForMultipleObjectsEx(unsigned long count, const void *handles,
+		unsigned long milliseconds, unsigned long wakeMask, unsigned long flags)
+		__asm__("MsgWaitForMultipleObjectsEx");
 ]]
 
 -- Held rather than loaded where it is called: a library handle the collector lets go of unloads the
 -- dll behind it, and what this module holds of it then points into nothing.
 user32Library = ffi.load("user32")
+
+-- What the wait is woken by: every kind of input there is, including a message another thread
+-- posted to a window of this one -- which is not something that sits in the queue until it is
+-- asked for. A message already looked at but not taken still wakes the wait, or a loop that
+-- peeked at one and left it would sleep through it.
+local QS_ALLINPUT = 0x04FF
+local MWMO_INPUTAVAILABLE = 0x0004
+local INFINITE = 0xFFFFFFFF
+
+-- The kinds of `WM_SIZE`, which is where the shell says a window has gone to the taskbar and come
+-- back. The two that are no size at all are the popup ones, which a window of this never is.
+local SIZE_MINIMIZED = 1
+local SIZE_MAXSHOW = 3
+local SIZE_MAXHIDE = 4
+
+local WM_SHOWWINDOW = 0x0018
+local WM_CONTEXTMENU = 0x007B
 
 -- The keys this platform names, by virtual key code. A letter, a digit and a punctuation key are
 -- named after what they are on a keyboard rather than after what the layout makes of them, which is
@@ -408,7 +496,11 @@ end
 ---@param callback winit.EventHandler
 local function deliverRedraws(loop, callback)
 	for _, window in pairs(loop.windows) do
-		if window.shouldRedraw then
+		-- A window that is not on the screen is not drawn: a frame into a surface the compositor
+		-- has taken away is one the render path waits on and never comes back from, which is a
+		-- player stopped behind its tray icon. What it was asked for stays asked: the frame is
+		-- drawn when the window is back.
+		if window.shouldRedraw and window.visible then
 			window.shouldRedraw = false
 			callback({ name = "redraw", window = window }, loop.handler)
 		end
@@ -426,6 +518,12 @@ function Win32EventLoop.new()
 
 	classCount = classCount + 1
 	class.lpszClassName = "winit-window-" .. classCount
+
+	-- The message Explorer sends when it starts again, asked for once: it is a message of the whole
+	-- system, so every window of this loop hears the same one, and nought where it could not be
+	-- named is a message nothing is compared against.
+	local taskbarCreated = Tray.taskbarCreated()
+
 	class.lpfnWndProc = ffi.cast("WNDPROC", user32.WndProc(function(hwnd, msg, wParam, lParam)
 		if not self.callback then
 			return user32.defWindowProc(hwnd, msg, wParam, lParam)
@@ -442,25 +540,98 @@ function Win32EventLoop.new()
 			-- frame being resized is.
 			return 1
 		elseif msg == user32.WM.PAINT then
-			self.callback({ name = "redraw", window = window }, self.handler)
+			if window.visible then
+				self.callback({ name = "redraw", window = window }, self.handler)
+			end
+
+			-- The region is said to be painted either way: what the app draws is not GDI -- the
+			-- frame goes to the surface the window was made for -- so the region holds nothing,
+			-- and a window left with an unpainted region is one the system asks about again and
+			-- again, which is a loop spinning on a frame that changes nothing.
+			user32Library.winit_ValidateRect(window.hwnd, nil)
+
 			return 0
 		elseif msg == user32.WM.SIZE then
-			if window then
+			local kind = tonumber(wParam)
+			local minimized = kind == SIZE_MINIMIZED
+
+			-- A window minimized to the taskbar says it has no client area at all. The size it had
+			-- is the one it comes back to and the one the app still draws at, so it is not
+			-- overwritten by nought: only a size the window really has is a size it is given.
+			if not minimized and kind ~= SIZE_MAXSHOW and kind ~= SIZE_MAXHIDE then
 				window.width = assert(tonumber(user32.LOWORD(lParam)))
 				window.height = assert(tonumber(user32.HIWORD(lParam)))
 			end
 
+			local wasMinimized = window.minimized
+			window.minimized = minimized
+			window.visible = window.shown and not minimized
+
 			self.callback({ name = "resize", window = window }, self.handler)
 
 			deliverRedraws(self, self.callback)
+
+			-- What a window becoming minimized and stopping being it are told once each, however
+			-- the shell got it there: the button on the title bar, the window's own menu, or a
+			-- program asking for it.
+			if minimized ~= wasMinimized then
+				self.callback({ window = window, name = minimized and "minimize" or "restore" },
+					self.handler)
+			end
+
 			return 0
-		elseif msg == 0x0018 then -- WM_SHOWWINDOW
-			if user32.LOWORD(wParam) ~= 0 then
+		elseif msg == WM_SHOWWINDOW then
+			local shown = user32.LOWORD(wParam) ~= 0
+
+			-- What the shell says here is whether the window is on the screen at all; a minimized
+			-- window still is, and is visible to the shell while it is not visible to the app.
+			window.shown = shown
+			window.visible = shown and not window.minimized
+
+			if shown then
 				self.callback({ window = window, name = "map" }, self.handler)
 			else
 				self.callback({ window = window, name = "unmap" }, self.handler)
 			end
 
+			return 0
+		elseif msg == Tray.MESSAGE then
+			-- What the shell says about the icon, as the mouse message that was meant for it: a
+			-- click on the icon itself, or the menu opened and a choice picked from it -- which is
+			-- what the shell answers with, and what the shell's own loop is busy with in between.
+			local name, id = Tray.message(window, tonumber(lParam))
+
+			if name == "trayClick" then
+				self.callback({ window = window, name = "trayClick" }, self.handler)
+			elseif name == "trayMenu" and id ~= nil then
+				self.callback({ window = window, name = "trayMenu", id = id }, self.handler)
+			end
+
+			return 0
+		elseif msg == WM_CONTEXTMENU then
+			-- The context key on the icon comes here as the window's own menu message. A right
+			-- click inside the window does too, with the pointer's place in it -- and that is the
+			-- app's business rather than the icon's, so only the keyboard's own menu, which has no
+			-- place, is the icon's.
+			local x, y = user32.GET_X_LPARAM(lParam), user32.GET_Y_LPARAM(lParam)
+
+			if x == -1 and y == -1 then
+				local name, id = Tray.message(window, WM_CONTEXTMENU)
+
+				if name ~= nil then
+					if id ~= nil then
+						self.callback({ window = window, name = "trayMenu", id = id }, self.handler)
+					end
+
+					return 0
+				end
+			end
+
+			return user32.defWindowProc(hwnd, msg, wParam, lParam)
+		elseif taskbarCreated ~= 0 and msg == taskbarCreated then
+			-- Explorer starting again took every icon with it when it went; this is it saying it
+			-- is back, and a window that had one putting it back where it was.
+			Tray.refresh(window)
 			return 0
 		elseif msg == user32.WM.MOUSEMOVE then
 			local x = user32.GET_X_LPARAM(lParam)
@@ -615,10 +786,15 @@ function Win32EventLoop.new()
 			self.currentMode = mode
 		end
 
-		--- A wait with a deadline is not in this backend: a screen with something to do on its own
-		--- is woken by the events it is given and no earlier.
+		--- How long the next wait may last, in seconds, or nothing to wait for an event with no end
+		--- to it. One wait: the deadline is what a program with something to do on its own asks
+		--- for, and it asks again for the next one. See `winit.EventManager:setTimeout`.
 		---@param seconds number?
-		function handler.setTimeout(_, seconds) end
+		---@return nil
+		function handler.setTimeout(_, seconds)
+			self.timeout = seconds
+			return nil
+		end
 
 		---@param window winit-win32.Window
 		function handler.requestRedraw(_, window)
@@ -669,16 +845,45 @@ function Win32EventLoop:run(callback)
 	end
 
 	local msg = user32.Msg()
-	while self.isActive do
-		if self.currentMode == "poll" then
-			if user32.peekMessage(msg, nil, 0, 0, user32.PM.REMOVE) then
-				user32.translateMessage(msg)
-				user32.dispatchMessage(msg)
-			end
-		else
-			user32.getMessage(msg, nil, 0, 0)
+
+	--- Everything the queue has, so that a burst is one iteration's worth of work rather than one
+	--- iteration each -- and so that a wait woken by a message leaves nothing of it behind to wake
+	--- the wait after it again.
+	local function drain()
+		while self.isActive and user32.peekMessage(msg, nil, 0, 0, user32.PM.REMOVE) do
 			user32.translateMessage(msg)
 			user32.dispatchMessage(msg)
+		end
+	end
+
+	while self.isActive do
+		if self.currentMode == "poll" then
+			-- What is already queued and no waiting for more: a burst of events is taken in one go,
+			-- and the frame that comes out of it is the one the last of them left.
+			drain()
+		else
+			-- The deadline the program asked for, if it asked for one: the wait ends on the first
+			-- message or on it, whichever comes first, so a program with something to do on its own
+			-- is woken by the clock rather than by an event that may never come.
+			local timeout = self.timeout
+			self.timeout = nil
+
+			local milliseconds = INFINITE
+
+			if timeout ~= nil then
+				milliseconds = math.ceil(timeout * 1000)
+
+				if milliseconds < 0 then
+					milliseconds = 0
+				elseif milliseconds >= INFINITE then
+					milliseconds = INFINITE - 1
+				end
+			end
+
+			user32Library.winit_MsgWaitForMultipleObjectsEx(0, nil, milliseconds, QS_ALLINPUT,
+				MWMO_INPUTAVAILABLE)
+
+			drain()
 		end
 
 		deliverRedraws(self, callback)
